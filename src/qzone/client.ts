@@ -1,4 +1,4 @@
-﻿/* ─────────────────────────────────────────────
+/* ─────────────────────────────────────────────
    QzoneClient – TypeScript 移植自 Python qzone_api/client.py
    ───────────────────────────────────────────── */
 
@@ -1093,11 +1093,20 @@ export class QzoneClient {
   // ──────────────────────────────────────────────
   // feeds3 缓存
   // ──────────────────────────────────────────────
-  private async fetchFeeds3Html(uin: string, forceRefresh = false, scope = 0, count = 0, externparam = ''): Promise<string> {
-    // externparam 翻页时需要不同的缓存 key，否则返回第一页的缓存
+  private async fetchFeeds3Html(
+    uin: string,
+    forceRefresh = false,
+    scope = 0,
+    count = 0,
+    externparam = '',
+    uinlist?: string,
+  ): Promise<string> {
+    // externparam 翻页时需要不同的缓存 key；uinlist 指定「只看某用户」时也要区分
     const cacheKey = externparam
       ? `${uin}_${scope}_page_${externparam.substring(0, 30)}`
-      : `${uin}_${scope}_${count}`;
+      : uinlist
+        ? `${uin}_${scope}_${count}_ul_${uinlist}`
+        : `${uin}_${scope}_${count}`;
     const now = Date.now() / 1000;
     if (!forceRefresh && this.feeds3Cache.has(cacheKey)) {
       if (now - (this.feeds3CacheTime.get(cacheKey) ?? 0) < this.feeds3CacheTtl) {
@@ -1110,7 +1119,7 @@ export class QzoneClient {
       scope: String(scope),
       view: '1',
       daylist: '',
-      uinlist: '',
+      uinlist: uinlist ?? '',
       gid: '',
       flag: '1',
       filter: 'all',
@@ -1266,20 +1275,38 @@ export class QzoneClient {
 
   private async getEmotionListViaFeeds3(uin: string, num = 20, pos = 0): Promise<ApiResponse> {
     try {
-      // 策略 1：scope=1（个人说说模式），只返回目标用户内容
+      const isOwn = uin === this.qqNumber;
+      // 策略 1：scope=1（个人说说模式），只返回目标用户内容；自己时可靠，好友时后端常返回空
       log('DEBUG', `feeds3 fallback: trying scope=1 for uin=${uin}`);
       let text = await this.fetchFeeds3Html(uin, true, 1, 50);
       let msglist = this.parseFeeds3Items(text, uin, undefined, pos + num);
       let usedScope = 1;
+      /** 是否用 scope=0 + uinlist=目标用户 拉取（仅当目标为好友且 scope=1 为空时尝试） */
+      let useUinlist = false;
 
-      // scope=1 没数据则降级到 scope=0（好友动态流）+ uin 过滤
+      // scope=1 没数据则尝试 scope=0 相关策略
       if (msglist.length === 0) {
-        log('DEBUG', 'feeds3 fallback: scope=1 returned 0, falling back to scope=0');
-        text = await this.fetchFeeds3Html(uin, true, 0, 50);
-        const friends = this.extractFriendsFromFeeds3FromText(text);
-        if (friends.length) this.mergeFriendCache(friends);
-        msglist = this.parseFeeds3Items(text, uin, undefined, pos + num);
-        usedScope = 0;
+        // 策略 2（仅当目标为好友）：scope=0 + uinlist=好友 — 以当前登录号请求「好友动态流」并限定只含该好友
+        if (!isOwn) {
+          log('DEBUG', `feeds3 fallback: scope=1 empty for friend, trying scope=0 with uinlist=${uin}`);
+          text = await this.fetchFeeds3Html(this.qqNumber!, true, 0, 50, '', uin);
+          const friends = this.extractFriendsFromFeeds3FromText(text);
+          if (friends.length) this.mergeFriendCache(friends);
+          msglist = this.parseFeeds3Items(text, uin, undefined, pos + num);
+          if (msglist.length > 0) {
+            usedScope = 0;
+            useUinlist = true;
+          }
+        }
+        // 策略 3：scope=0 无 uinlist（或 uinlist 无效时），uin=目标用户，再按 uin 过滤
+        if (msglist.length === 0) {
+          log('DEBUG', 'feeds3 fallback: trying scope=0 without uinlist');
+          text = await this.fetchFeeds3Html(uin, true, 0, 50);
+          const friends = this.extractFriendsFromFeeds3FromText(text);
+          if (friends.length) this.mergeFriendCache(friends);
+          msglist = this.parseFeeds3Items(text, uin, undefined, pos + num);
+          usedScope = 0;
+        }
       }
 
       // ── 从 feeds3 HTML 中提取内嵌评论 ──
@@ -1300,7 +1327,9 @@ export class QzoneClient {
         log('DEBUG', `feeds3 pagination: got ${msglist.length}, need ${pos + num}, scope=${usedScope}`);
         
         remainingPages--;
-        currentText = await this.fetchFeeds3Html(uin, true, usedScope, 50, externparam);
+        currentText = useUinlist
+          ? await this.fetchFeeds3Html(this.qqNumber!, true, 0, 50, externparam, uin)
+          : await this.fetchFeeds3Html(uin, true, usedScope, 50, externparam);
         allHtmlTexts.push(currentText);
         const page = this.parseFeeds3Items(currentText, uin, undefined, 50);
         
@@ -1363,8 +1392,9 @@ export class QzoneClient {
 
       if (pos > 0) msglist = msglist.slice(pos);
       if (msglist.length > num) msglist = msglist.slice(0, num);
-      log('INFO', `feeds3 fallback (scope=${usedScope}) 获取到 ${msglist.length} 条说说`);
-      return { code: 0, message: `ok (feeds3 fallback, scope=${usedScope})`, msglist, _source: 'feeds3' };
+      const scopeLabel = useUinlist ? `scope=0+uinlist` : `scope=${usedScope}`;
+      log('INFO', `feeds3 fallback (${scopeLabel}) 获取到 ${msglist.length} 条说说`);
+      return { code: 0, message: `ok (feeds3 fallback, ${scopeLabel})`, msglist, _source: 'feeds3' };
     } catch (exc) {
       log('ERROR', `feeds3 fallback 失败: ${exc}`);
       return { code: -10000, message: String(exc), msglist: [] };

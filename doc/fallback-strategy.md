@@ -21,6 +21,10 @@
 3. **降级**: `feeds3_html_more` (GET, HTML 解析)
    - 通过 `parseFeeds3Items` 解析 HTML 片段
    - 支持 `pos` 参数模拟分页（取前 `pos + num` 条后切片）
+   - **指定用户（好友）说说**：当 PC API 限流且目标为好友时，feeds3 依次尝试：
+     1. `scope=1`、`uin=目标`（个人说说模式，bot 账号下对好友常返回空）
+     2. `scope=0`、`uin=当前登录号`、`uinlist=目标`（好友动态流限定为该好友，若后端支持 uinlist 过滤则可能拿到数据）
+     3. `scope=0`、`uin=目标`（再按 uin 过滤，bot 下 scope=0 也常为空）
 
 ### 说说详情
 
