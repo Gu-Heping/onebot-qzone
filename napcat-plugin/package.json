@@ -1,0 +1,18 @@
+{
+  "name": "qzone-bridge-napcat-plugin",
+  "version": "2.0.0",
+  "description": "QZone Bridge NapCat 原生插件",
+  "type": "module",
+  "main": "dist/index.mjs",
+  "scripts": {
+    "build": "tsup src/index.ts --format esm --outDir dist --dts --target es2022",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.2",
+    "tsup": "^8.0.0"
+  },
+  "peerDependencies": {
+    "napcat": "*"
+  }
+}

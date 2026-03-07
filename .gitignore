@@ -1,0 +1,17 @@
+# Node
+node_modules/
+dist/
+
+# Cache / Runtime
+cache/
+test_cache/
+logs/
+playwright_debug.html
+
+# Env
+.env
+
+# Python (legacy)
+.venv/
+__pycache__/
+*.egg-info/

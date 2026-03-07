@@ -1,0 +1,103 @@
+/**
+ * EventHub 单元测试
+ */
+import { EventHub } from '../../src/bridge/hub.js';
+import { assert, runSuite, type TestCase } from '../test-helpers.js';
+
+const cases: TestCase[] = [
+  {
+    name: 'subscribe + publish 基本工作',
+    fn: async () => {
+      const hub = new EventHub();
+      const received: unknown[] = [];
+      hub.subscribe((ev) => { received.push(ev); });
+      await hub.publish({ type: 'test', data: 1 });
+      assert(received.length === 1, '应收到 1 条');
+      assert((received[0] as any).data === 1, '数据应一致');
+    },
+  },
+  {
+    name: 'publish 多订阅者全部收到',
+    fn: async () => {
+      const hub = new EventHub();
+      let c1 = 0, c2 = 0;
+      hub.subscribe(() => { c1++; });
+      hub.subscribe(() => { c2++; });
+      await hub.publish({ type: 'x' });
+      assert(c1 === 1 && c2 === 1, '两个订阅者都应收到');
+    },
+  },
+  {
+    name: 'unsubscribe 后不再收到',
+    fn: async () => {
+      const hub = new EventHub();
+      let count = 0;
+      const cb = () => { count++; };
+      hub.subscribe(cb);
+      await hub.publish({ type: 'a' });
+      hub.unsubscribe(cb);
+      await hub.publish({ type: 'b' });
+      assert(count === 1, 'unsubscribe 后不应再收到');
+    },
+  },
+  {
+    name: 'publish 单回调异常不阻断其他',
+    fn: async () => {
+      const hub = new EventHub();
+      let ok = false;
+      hub.subscribe(() => { throw new Error('boom'); });
+      hub.subscribe(() => { ok = true; });
+      await hub.publish({ type: 'err' });
+      assert(ok === true, '第二个回调应正常执行');
+    },
+  },
+  {
+    name: 'subscriberCount 正确',
+    fn: () => {
+      const hub = new EventHub();
+      assert(hub.subscriberCount() === 0, '初始为 0');
+      const cb = () => {};
+      hub.subscribe(cb);
+      assert(hub.subscriberCount() === 1, '添加后为 1');
+      hub.unsubscribe(cb);
+      assert(hub.subscriberCount() === 0, '移除后为 0');
+    },
+  },
+  {
+    name: 'seedTid 去重 + FIFO 上限',
+    fn: () => {
+      const hub = new EventHub();
+      hub.addSeedTid('a');
+      hub.addSeedTid('a'); // 重复
+      assert(hub.getSeedTids().length === 1, '重复不应增加');
+      // 加满 20 条
+      for (let i = 0; i < 25; i++) hub.addSeedTid(`t_${i}`);
+      const tids = hub.getSeedTids();
+      assert(tids.length === 20, '最多 20 条');
+      assert(!tids.includes('t_0'), '最早的应被淘汰');
+      assert(tids.includes('t_24'), '最新的应保留');
+    },
+  },
+  {
+    name: 'getSeedTids 返回副本',
+    fn: () => {
+      const hub = new EventHub();
+      hub.addSeedTid('x');
+      const t1 = hub.getSeedTids();
+      t1.push('injected');
+      assert(hub.getSeedTids().length === 1, '修改副本不应影响原数据');
+    },
+  },
+  {
+    name: '无订阅者时 publish 不报错',
+    fn: async () => {
+      const hub = new EventHub();
+      await hub.publish({ type: 'lonely' });
+      // 不抛异常即通过
+    },
+  },
+];
+
+export async function run() {
+  return runSuite('hub/EventHub', cases);
+}

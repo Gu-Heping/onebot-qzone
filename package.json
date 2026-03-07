@@ -1,0 +1,37 @@
+{
+  "name": "qzone-onebot-bridge",
+  "version": "1.0.0",
+  "description": "QQ空间 → OneBot v11 Bridge (TypeScript)",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx src/main.ts",
+    "build": "tsup src/main.ts --format esm --out-dir dist --dts",
+    "build:plugin": "tsup napcat-plugin/src/index.ts --format esm --out-dir napcat-plugin/dist",
+    "test": "tsx test/run-all.ts",
+    "test:unit": "tsx test/run-all.ts",
+    "test:api": "tsx test/run-all.ts --api",
+    "test:api:readonly": "tsx test/run-all.ts --api --readonly",
+    "test:all": "tsx test/run-all.ts --api",
+    "typecheck": "tsc --noEmit",
+    "verify": "tsx scripts/verify-endpoints.ts",
+    "verify:readonly": "tsx scripts/verify-endpoints.ts --skip-write"
+  },
+  "dependencies": {
+    "axios": "^1.7.9",
+    "axios-cookiejar-support": "^5.0.5",
+    "dotenv": "^16.4.7",
+    "p-limit": "^6.2.0",
+    "playwright": "^1.58.2",
+    "tough-cookie": "^5.1.1",
+    "ws": "^8.18.0",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.7",
+    "@types/tough-cookie": "^4.0.5",
+    "@types/ws": "^8.5.13",
+    "tsup": "^8.3.5",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3"
+  }
+}

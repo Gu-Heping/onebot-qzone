@@ -1,0 +1,391 @@
+/* ─────────────────────────────────────────────
+   feeds3 HTML 解析器 (Feeds3 Parser)
+   从 feeds3_html_more 的 HTML/JS 混合响应中
+   提取说说列表、好友列表、翻页参数
+   ───────────────────────────────────────────── */
+
+import { log, htmlUnescape } from './utils.js';
+
+// ── feeds3 说说解析 ─────────────────────────────
+
+/**
+ * 从 feeds3 HTML 响应中提取说说列表。
+ * 先用 feed_data `<i>` 标签策略，无结果时 fallback 到 JS data 数组。
+ *
+ * @param text          feeds3_html_more 原始响应文本（已 unescape）
+ * @param filterUin     只保留该 UIN 的说说（可选）
+ * @param filterAppid   只保留该 appid 的说说（可选）
+ * @param maxItems      最大返回条数
+ */
+export function parseFeeds3Items(
+  text: string,
+  filterUin?: string,
+  filterAppid?: string,
+  maxItems = 50,
+): Record<string, unknown>[] {
+  log('DEBUG', `parseFeeds3Items: text length=${text.length}, filterUin=${filterUin}, filterAppid=${filterAppid ?? '(any)'}, maxItems=${maxItems}`);
+
+  const msglist: Record<string, unknown>[] = [];
+  const seenTids = new Set<string>();
+
+  // ---- 策略 1：feed_data <i> 标签（最可靠）----
+  const feedDataPat = /name="feed_data"\s*([^>]*)>/g;
+  const dataAttr = (attrs: string, name: string): string => {
+    const m = attrs.match(new RegExp(`data-${name}="([^"]*)"`));
+    return m?.[1] ?? '';
+  };
+
+  // feed block: id="feed_{opuin}_{appid}_{typeid}_{timestamp}_{x}_{x}"
+  const feedIdPat = /id="feed_(\d+)_(\d+)_(\d+)_(\d+)_\d+_\d+"[^>]*?>([\s\S]*?)(?=<div class="qz_summary|<li class="f-single|$)/g;
+
+  interface FeedBlock { opuin: string; appid: string; typeid: string; timestamp: number; block: string; }
+  const feedBlocks: FeedBlock[] = [];
+  let fb: RegExpExecArray | null;
+  while ((fb = feedIdPat.exec(text)) !== null) {
+    feedBlocks.push({
+      opuin: fb[1]!, appid: fb[2]!, typeid: fb[3]!,
+      timestamp: parseInt(fb[4]!, 10), block: fb[5]!,
+    });
+  }
+
+  const contentPat = /class="txt-box-title[^"]*"[^>]*>([\s\S]*?)<\/p>/;
+  const contentPatAlt = /class="txt-box\s[^"]*"[^>]*>([\s\S]*?)(?:<div\s+class="f-single-foot|<div\s+class="f-ct-b|<\/li>)/;
+  const nicknamePat = /class="f-name[^"]*"[^>]*>([\s\S]*?)<\/a>/;
+  const cmtnumPat = /class="f-ct[^"]*"[^>]*>(\d+)/;
+
+  let fdm: RegExpExecArray | null;
+  while ((fdm = feedDataPat.exec(text)) !== null) {
+    const attrs = fdm[1]!;
+    const tid = dataAttr(attrs, 'tid');
+    const dataUin = dataAttr(attrs, 'uin');
+    const origTid = dataAttr(attrs, 'origtid');
+    const origUin = dataAttr(attrs, 'origuin');
+    const abstime = parseInt(dataAttr(attrs, 'abstime') || '0', 10);
+
+    if (tid === 'advertisement_app' || dataUin === '0' || !tid) continue;
+    if (filterUin && dataUin !== filterUin) continue;
+    if (seenTids.has(tid)) continue;
+    seenTids.add(tid);
+
+    const fdPos = fdm.index;
+    let matchedBlock: FeedBlock | undefined;
+    let closestDist = Infinity;
+    for (const blk of feedBlocks) {
+      const blkStart = text.indexOf(`id="feed_${blk.opuin}_${blk.appid}_${blk.typeid}_${blk.timestamp}_`);
+      if (blkStart >= 0 && blkStart < fdPos) {
+        const dist = fdPos - blkStart;
+        if (dist < closestDist) {
+          closestDist = dist;
+          matchedBlock = blk;
+        }
+      }
+    }
+
+    if (filterAppid && matchedBlock && matchedBlock.appid !== filterAppid) continue;
+
+    const searchAfter = text.substring(fdPos, Math.min(fdPos + 5000, text.length));
+    const searchBefore = text.substring(Math.max(0, fdPos - 5000), fdPos);
+
+    let content = '';
+    let nickname = '';
+    let cmtnum = 0;
+    const images: string[] = [];
+
+    const isForward = !!(origTid && origTid !== tid);
+    let rt_tid = '';
+    let rt_uin = '';
+    let rt_uinname = '';
+    let rt_con = '';
+
+    // 1) scope=1: txt-box-title（AFTER）
+    const cmAfter = searchAfter.match(contentPat);
+
+    // 2) scope=0: f-info（BEFORE，取最后一个匹配）
+    const fInfoPat = /<div class="f-info">([\s\S]*?)<\/div>/g;
+    const allFInfo = [...searchBefore.matchAll(fInfoPat)];
+    const cmFInfo = allFInfo.length > 0 ? allFInfo[allFInfo.length - 1]! : null;
+
+    // 3) scope=0: txt-box（AFTER，用于转发原始内容）
+    const cmTxtBoxAfter = searchAfter.match(contentPatAlt);
+
+    if (cmAfter) {
+      const rawHtml = cmAfter[1]!;
+
+      if (isForward || rawHtml.includes('>转发')) {
+        const sections = rawHtml.split(/<a\s+class="nickname/);
+
+        if (sections.length >= 3) {
+          const fwdSection = sections[1]!;
+          const fwdNickMatch = fwdSection.match(/>([^<]+)<\/a>/);
+          nickname = fwdNickMatch ? fwdNickMatch[1]!.trim() : '';
+
+          const fwdTextClean = fwdSection
+            .replace(/<[^>]+>/g, '').replace(/&nbsp;/gi, ' ')
+            .replace(/\\[trn]/g, '').replace(/[\t\r\n]+/g, ' ').trim();
+          const fwdColonIdx = fwdTextClean.indexOf('：');
+          const fwdContent = fwdColonIdx >= 0 ? fwdTextClean.substring(fwdColonIdx + 1).trim() : fwdTextClean;
+
+          const origSection = sections[2]!;
+          const origNickMatch = origSection.match(/>([^<]+)<\/a>/);
+          rt_uinname = origNickMatch ? origNickMatch[1]!.trim() : '';
+
+          const origTextClean = origSection
+            .replace(/<[^>]+>/g, '').replace(/&nbsp;/gi, ' ')
+            .replace(/\\[trn]/g, '').replace(/[\t\r\n]+/g, ' ').trim();
+          const origColonIdx = origTextClean.indexOf('：');
+          rt_con = origColonIdx >= 0 ? origTextClean.substring(origColonIdx + 1).trim() : origTextClean;
+
+          rt_tid = origTid || tid;
+          rt_uin = origUin || dataUin;
+          content = fwdContent;
+        } else if (sections.length === 2) {
+          const rawText = rawHtml.replace(/<[^>]+>/g, '').replace(/&nbsp;/gi, ' ')
+            .replace(/\\[trn]/g, '').replace(/[\t\r\n]+/g, ' ').trim();
+          const colonIdx = rawText.indexOf('：');
+          content = colonIdx >= 0 ? rawText.substring(colonIdx + 1).trim() : rawText;
+          rt_tid = origTid || '';
+          rt_uin = origUin || '';
+        }
+      } else {
+        const rawText = rawHtml.replace(/<[^>]+>/g, '').replace(/&nbsp;/gi, ' ')
+          .replace(/\\[trn]/g, '').replace(/[\t\r\n]+/g, ' ').trim();
+        const colonIdx = rawText.indexOf('：');
+        if (colonIdx >= 0) {
+          content = rawText.substring(colonIdx + 1).trim();
+          if (!nickname) nickname = rawText.substring(0, colonIdx).trim();
+        } else {
+          content = rawText;
+        }
+      }
+    } else if (cmFInfo) {
+      const rawText = cmFInfo[1]!.replace(/<[^>]+>/g, '').replace(/&nbsp;/gi, ' ')
+        .replace(/\\[trn]/g, '').replace(/[\t\r\n]+/g, ' ').trim();
+      content = rawText;
+
+      if (isForward) {
+        rt_tid = origTid || tid;
+        rt_uin = origUin || dataUin;
+
+        if (cmTxtBoxAfter) {
+          const origHtml = cmTxtBoxAfter[1]!;
+          const origNickMatch = origHtml.match(/<a[^>]*class="nickname[^"]*"[^>]*>([^<]+)<\/a>/);
+          rt_uinname = origNickMatch ? origNickMatch[1]!.trim() : '';
+
+          const origText = origHtml.replace(/<[^>]+>/g, '').replace(/&nbsp;/gi, ' ')
+            .replace(/\\[trn]/g, '').replace(/[\t\r\n]+/g, ' ').trim();
+          const origColonIdx = origText.indexOf('：');
+          rt_con = origColonIdx >= 0 ? origText.substring(origColonIdx + 1).trim() : origText;
+        }
+      }
+    }
+
+    if (!nickname) {
+      const searchRegion = searchAfter + searchBefore;
+      const nm = searchRegion.match(nicknamePat);
+      if (nm) nickname = nm[1]!.replace(/<[^>]+>/g, '').trim();
+    }
+
+    const cm2 = searchAfter.match(cmtnumPat);
+    if (cm2) cmtnum = parseInt(cm2[1]!, 10);
+
+    const fullRegion = searchBefore + searchAfter;
+    const regionDecoded = htmlUnescape(fullRegion);
+    for (const im of regionDecoded.matchAll(/<img[^>]+src="([^"]+)"/gi)) {
+      const src = im[1]!;
+      if ((src.includes('qpic.cn') || src.includes('photo.store.qq.com') ||
+           /\.(jpg|jpeg|png|gif|webp)$/i.test(src)) &&
+          !src.includes('qlogo') && !images.includes(src)) {
+        images.push(src);
+      }
+    }
+
+    const timestamp = abstime || (matchedBlock?.timestamp ?? 0);
+
+    const item: Record<string, unknown> = {
+      tid, uin: dataUin, nickname, content,
+      created_time: timestamp, createTime: String(timestamp),
+      cmtnum, fwdnum: isForward ? 1 : 0,
+      pic: images.map(u => ({ url: u })),
+      appid: matchedBlock?.appid ?? '',
+      _source: 'feeds3',
+    };
+
+    if (isForward || rt_tid) {
+      item['rt_tid'] = rt_tid;
+      item['rt_uin'] = rt_uin;
+      item['rt_uinname'] = rt_uinname;
+      item['rt_con'] = rt_con;
+    }
+
+    msglist.push(item);
+
+    if (msglist.length >= maxItems) break;
+  }
+
+  // 按创建时间降序
+  msglist.sort((a, b) => {
+    const ta = (a['created_time'] as number) || 0;
+    const tb = (b['created_time'] as number) || 0;
+    return tb - ta;
+  });
+
+  log('DEBUG', `parseFeeds3Items: feed_data strategy found ${msglist.length} items`);
+
+  // ---- 策略 2：JS data 数组 fallback ----
+  if (msglist.length === 0) {
+    log('DEBUG', 'parseFeeds3Items: feed_data strategy found 0, trying JS data array');
+    const jsItemPat = /\{[^{}]*?appid:'(\d+)'[^{}]*?key:'([^']*)'[^{}]*?abstime:'(\d+)'[^{}]*?uin:'(\d+)'[^{}]*?nickname:'([^']*)'/g;
+    let jsm: RegExpExecArray | null;
+    while ((jsm = jsItemPat.exec(text)) !== null) {
+      const appid = jsm[1]!;
+      const tid = jsm[2]!;
+      const jsAbstime = parseInt(jsm[3]!, 10);
+      const feedUin = jsm[4]!;
+      const jsNickname = jsm[5]!;
+
+      if (filterAppid && appid !== filterAppid) continue;
+      if (feedUin === '0') continue;
+      if (seenTids.has(tid)) continue;
+      seenTids.add(tid);
+
+      let jsContent = '';
+      let jsRtTid = '';
+      let jsRtUin = '';
+      let jsRtUinname = '';
+      let jsRtCon = '';
+      let jsIsForward = false;
+
+      const afterItem = text.substring(jsm.index, Math.min(jsm.index + 20000, text.length));
+      const htmlFieldMatch = afterItem.match(/html:'((?:[^'\\]|\\.)*)'/);
+      if (htmlFieldMatch) {
+        const decoded = htmlFieldMatch[1]!.replace(/\\x([0-9a-fA-F]{2})/g,
+          (_: string, h: string) => String.fromCharCode(parseInt(h, 16)));
+        const titleMatch = decoded.match(/class="txt-box-title[^"]*"[^>]*>([\s\S]*?)<\/p>/);
+        if (titleMatch) {
+          const rawHtml = titleMatch[1]!;
+          if (rawHtml.includes('>转发')) {
+            jsIsForward = true;
+            const sections = rawHtml.split(/<a\s+class="nickname/);
+            if (sections.length >= 3) {
+              const fwdText = sections[1]!.replace(/<[^>]+>/g, '').replace(/&nbsp;/gi, ' ')
+                .replace(/\\[trn]/g, '').replace(/[\t\r\n]+/g, ' ').trim();
+              const fwdColonIdx = fwdText.indexOf('：');
+              jsContent = fwdColonIdx >= 0 ? fwdText.substring(fwdColonIdx + 1).trim() : fwdText;
+
+              const origText = sections[2]!.replace(/<[^>]+>/g, '').replace(/&nbsp;/gi, ' ')
+                .replace(/\\[trn]/g, '').replace(/[\t\r\n]+/g, ' ').trim();
+              const origNickMatch = sections[2]!.match(/>([^<]+)<\/a>/);
+              jsRtUinname = origNickMatch ? origNickMatch[1]!.trim() : '';
+              const origColonIdx = origText.indexOf('：');
+              jsRtCon = origColonIdx >= 0 ? origText.substring(origColonIdx + 1).trim() : origText;
+              jsRtTid = tid;
+              jsRtUin = feedUin;
+            }
+          } else {
+            const rawText = rawHtml.replace(/<[^>]+>/g, '').replace(/&nbsp;/gi, ' ')
+              .replace(/\\[trn]/g, '').replace(/[\t\r\n]+/g, ' ').trim();
+            const colonIdx = rawText.indexOf('：');
+            jsContent = colonIdx >= 0 ? rawText.substring(colonIdx + 1).trim() : rawText;
+          }
+        }
+      }
+
+      const jsItem: Record<string, unknown> = {
+        tid, uin: feedUin, nickname: jsNickname, content: jsContent,
+        created_time: jsAbstime, createTime: String(jsAbstime),
+        cmtnum: 0, fwdnum: jsIsForward ? 1 : 0, pic: [],
+        appid,
+        _source: 'feeds3',
+      };
+      if (jsIsForward) {
+        jsItem['rt_tid'] = jsRtTid;
+        jsItem['rt_uin'] = jsRtUin;
+        jsItem['rt_uinname'] = jsRtUinname;
+        jsItem['rt_con'] = jsRtCon;
+      }
+
+      msglist.push(jsItem);
+
+      if (msglist.length >= maxItems) break;
+    }
+
+    msglist.sort((a, b) => {
+      const ta = (a['created_time'] as number) || 0;
+      const tb = (b['created_time'] as number) || 0;
+      return tb - ta;
+    });
+    log('DEBUG', `parseFeeds3Items: JS fallback found ${msglist.length} items`);
+  }
+  return msglist;
+}
+
+// ── feeds3 好友提取 ─────────────────────────────
+
+/**
+ * 从 feeds3 HTML 文本中提取好友 UIN / 昵称 / 头像。
+ * 两层策略：JS opuin 数据 → HTML f-nick 标签。
+ *
+ * @param text      feeds3 HTML 响应
+ * @param selfUin   自身 QQ 号（会被排除）
+ */
+export function extractFriendsFromFeeds3FromText(
+  text: string,
+  selfUin: string,
+): Array<{ uin: string; nickname: string; avatar: string }> {
+  const byUin = new Map<string, { uin: string; nickname: string; avatar: string }>();
+
+  // 1) JS 数据：opuin/uin/nickname/logimg
+  const opuinRe = /\bopuin:'(\d+)'/g;
+  let m: RegExpExecArray | null;
+  while ((m = opuinRe.exec(text)) !== null) {
+    const opuin = m[1]!;
+    if (opuin === '0') continue;
+    const start = m.index;
+    const nextOpuin = text.indexOf("opuin:'", start + 1);
+    const end = nextOpuin >= 0 ? nextOpuin : text.length;
+    const block = text.slice(start, end);
+    const uinM = block.match(/\buin:'(\d+)'/);
+    const uin = uinM ? uinM[1]! : opuin;
+    const nickM = block.match(/\bnickname:'((?:[^'\\]|\\.)*)'/);
+    const nickname = nickM ? nickM[1]!.replace(/\\'/g, "'") : '';
+    const logM = block.match(/\blogimg:'((?:[^'\\]|\\.)*)'/);
+    const avatar = logM ? logM[1]!.replace(/\\'/g, "'") : '';
+    if (!byUin.has(uin)) {
+      byUin.set(uin, { uin, nickname, avatar });
+    } else {
+      const cur = byUin.get(uin)!;
+      if (nickname) cur.nickname = nickname;
+      if (avatar) cur.avatar = avatar;
+    }
+  }
+
+  // 2) HTML f-nick 标签
+  const fNickRe = /<div\s+class="f-nick"[^>]*>[\s\S]*?<a[^>]+href="[^"]*\/(\d+)"[^>]*>([\s\S]*?)<\/a>/gi;
+  while ((m = fNickRe.exec(text)) !== null) {
+    const uin = m[1]!;
+    let nickname = (m[2] ?? '').replace(/<[^>]+>/g, '').trim();
+    nickname = htmlUnescape(nickname);
+    if (!uin || uin === '0') continue;
+    if (!byUin.has(uin)) {
+      byUin.set(uin, { uin, nickname, avatar: '' });
+    } else {
+      const cur = byUin.get(uin)!;
+      if (nickname && !cur.nickname) cur.nickname = nickname;
+    }
+  }
+
+  const list = Array.from(byUin.values()).filter((f) => f.uin !== selfUin);
+  log('DEBUG', `extractFriendsFromFeeds3FromText: ${list.length} friends (excluded self ${selfUin})`);
+  return list;
+}
+
+// ── 翻页参数提取 ─────────────────────────────────
+
+/** 从 feeds3 响应中提取 externparam 翻页参数 */
+export function extractExternparam(text: string): string {
+  const m = text.match(/externparam:'([^']+)'/);
+  if (m) return m[1]!;
+  const m2 = text.match(/"externparam":"([^"]+)"/);
+  if (m2) return m2[1]!;
+  return '';
+}
