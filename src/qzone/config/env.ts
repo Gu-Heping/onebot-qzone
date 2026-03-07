@@ -28,6 +28,14 @@ export const env = {
   get playwrightExecutable() { return str('QZONE_PLAYWRIGHT_EXECUTABLE'); },
   get playwrightChannel() { return str('QZONE_PLAYWRIGHT_CHANNEL', 'chrome'); },
   get playwrightTimeoutMs() { return int('QZONE_PLAYWRIGHT_TIMEOUT_MS', 15_000); },
+  /** 强制 headless 模式（'1'/'true'=强制 headless，'0'/'false'=强制 headed，空=自动检测 DISPLAY） */
+  get playwrightHeadless(): boolean | null {
+    const v = str('QZONE_PLAYWRIGHT_HEADLESS');
+    if (!v) return null;
+    if (['1', 'true', 'yes'].includes(v.toLowerCase())) return true;
+    if (['0', 'false', 'no'].includes(v.toLowerCase())) return false;
+    return null;
+  },
 
   // ── Cookie ────────────────────────────────
   /** QZONE_COOKIE_STRING 或 QZONE_COOKIE（兼容两种写法） */

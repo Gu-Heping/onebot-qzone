@@ -84,10 +84,15 @@ async function main(): Promise<void> {
     }
 
     if (!client.loggedIn && config.enableQr) {
-      log('INFO', '启动 Playwright 浏览器扫码登录...');
-      await client.loginWithPlaywright();
-      loginMethod = 'Playwright 扫码';
-      // 扫码成功后同步到 .env
+      const envHeadless = env.playwrightHeadless;
+      const hasDisplay = !!(process.env['DISPLAY'] || process.env['WAYLAND_DISPLAY']);
+      const headless = envHeadless !== null ? envHeadless : !hasDisplay;
+      if (headless && envHeadless === null) {
+        log('INFO', '未检测到图形显示器 ($DISPLAY)，自动切换 headless 模式（二维码保存到文件）');
+      }
+      log('INFO', `启动 Playwright 浏览器扫码登录 (headless=${headless})...`);
+      await client.loginWithPlaywright(300, headless);
+      loginMethod = headless ? 'Playwright 扫码 (headless)' : 'Playwright 扫码';
       if (client.loggedIn) client.syncCookieToEnvFile();
     }
 

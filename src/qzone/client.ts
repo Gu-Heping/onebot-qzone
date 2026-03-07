@@ -1,4 +1,4 @@
-﻿/* ─────────────────────────────────────────────
+/* ─────────────────────────────────────────────
    QzoneClient – TypeScript 移植自 Python qzone_api/client.py
    ───────────────────────────────────────────── */
 
@@ -481,26 +481,27 @@ export class QzoneClient {
         '&s_url=https%3A%2F%2Fqzs.qzone.qq.com%2Fqzone%2Fv5%2Floginsucc.html%3Fpara%3Dizone' +
         '&pt_3rd_aid=0&hide_title_bar=1&hide_border=1';
 
-      await page.goto(xloginUrl, { waitUntil: 'networkidle', timeout: 30000 });
+      await page.goto(xloginUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
 
-      // 保存 QR 码图片到磁盘（给 headless 场景用）
+      // 保存 QR 码图片到磁盘
       const cacheDir = this.config.cachePath;
       if (!fs.existsSync(cacheDir)) fs.mkdirSync(cacheDir, { recursive: true });
+      const absQrPath = path.resolve(this.qrcodePath);
       try {
         const qrImg = page.locator('#qrlogin_img, img[src*="ptqrshow"]').first();
         await qrImg.waitFor({ state: 'visible', timeout: 10000 });
-        await qrImg.screenshot({ path: this.qrcodePath });
-        log('INFO', `QR 码已保存到: ${this.qrcodePath}`);
+        await qrImg.screenshot({ path: absQrPath });
+        log('INFO', `QR 码已保存到: ${absQrPath}`);
       } catch {
-        // 整页截图作为后备
-        await page.screenshot({ path: this.qrcodePath });
-        log('INFO', `QR 码截图已保存到: ${this.qrcodePath}（整页截图）`);
+        await page.screenshot({ path: absQrPath });
+        log('INFO', `QR 码截图已保存到: ${absQrPath}（整页截图）`);
       }
 
       if (headless) {
-        log('INFO', '请用手机 QQ 扫描上述二维码文件（图片会自动刷新）');
+        log('INFO', `请用手机 QQ 扫描二维码文件: ${absQrPath}`);
+        log('INFO', '二维码每 10 秒自动刷新，5 分钟内有效');
       } else {
-        log('INFO', '浏览器已打开，请用手机 QQ 扫描屏幕上的二维码');
+        log('INFO', `浏览器已打开，请用手机 QQ 扫描屏幕上的二维码（文件: ${absQrPath}）`);
       }
 
       // 等待登录成功（页面会经历多级跳转：ptlogin → check_sig → loginsucc → qzone）
@@ -516,8 +517,8 @@ export class QzoneClient {
             const qrImg = page.locator('#qrlogin_img, img[src*="ptqrshow"]').first();
             const isVisible = await qrImg.isVisible().catch(() => false);
             if (isVisible) {
-              await qrImg.screenshot({ path: this.qrcodePath });
-              log('DEBUG', `QR 码截图已刷新: ${this.qrcodePath}`);
+              await qrImg.screenshot({ path: absQrPath });
+              log('DEBUG', `QR 码截图已刷新: ${absQrPath}`);
             }
           } catch { /* QR element may have disappeared after scan */ }
           lastQrRefresh = Date.now();
@@ -541,7 +542,7 @@ export class QzoneClient {
           await page.waitForTimeout(3000);
           try {
             await page.goto('https://user.qzone.qq.com/', {
-              waitUntil: 'networkidle',
+              waitUntil: 'domcontentloaded',
               timeout: 15000,
             });
           } catch { /* timeout is ok, cookies should be set by now */ }
@@ -600,7 +601,7 @@ export class QzoneClient {
       if (!this.qqNumber) throw new Error('登录成功但未获取到 QQ 号');
 
       this.saveCookies();
-      try { fs.unlinkSync(this.qrcodePath); } catch { /* ignore */ }
+      try { fs.unlinkSync(absQrPath); } catch { /* ignore */ }
       log('INFO', `Playwright QR 登录成功，QQ号: ${this.qqNumber}`);
 
       await ctx.close();
@@ -654,15 +655,16 @@ export class QzoneClient {
 
       // 访问 QZone 主页，触发服务端 Cookie 刷新
       await page.goto(`https://user.qzone.qq.com/${this.qqNumber}`, {
-        waitUntil: 'networkidle',
+        waitUntil: 'domcontentloaded',
         timeout: 20000,
       });
-      // 再访问一下说说页，确保 p_skey 被触碰
+      await page.waitForTimeout(3000);
       try {
         await page.goto(`https://user.qzone.qq.com/${this.qqNumber}/311`, {
-          waitUntil: 'networkidle',
+          waitUntil: 'domcontentloaded',
           timeout: 15000,
         });
+        await page.waitForTimeout(2000);
       } catch { /* timeout ok */ }
 
       // 检查是否跳到了登录页（Cookie 已失效）
@@ -868,7 +870,8 @@ export class QzoneClient {
 
       // 导航到说说页面
       const shuoshuoUrl = `https://user.qzone.qq.com/${targetUin}/311`;
-      await page.goto(shuoshuoUrl, { waitUntil: 'networkidle', timeout });
+      await page.goto(shuoshuoUrl, { waitUntil: 'domcontentloaded', timeout });
+      await page.waitForTimeout(3000);
 
       // 等待 API 响应被拦截
       const deadline = Date.now() + 10000;
@@ -1003,7 +1006,8 @@ export class QzoneClient {
           const ctx = await browser.newContext();
           await ctx.addCookies(workerData.cookies);
           const page = await ctx.newPage();
-          await page.goto(workerData.targetUrl, { waitUntil: 'networkidle', timeout: workerData.timeoutMs });
+          await page.goto(workerData.targetUrl, { waitUntil: 'domcontentloaded', timeout: workerData.timeoutMs });
+          await new Promise(r => setTimeout(r, 3000));
           const token = await page.evaluate(() => {
             try {
               if (window.g_qzonetoken) {
@@ -2005,8 +2009,8 @@ export class QzoneClient {
       await ctx.addCookies(cookieArray);
       const page = await ctx.newPage();
       const url = `https://user.qzone.qq.com/${uin}/friends/manage`;
-      await page.goto(url, { waitUntil: 'networkidle', timeout: 30000 });
-      await page.waitForTimeout(3000);
+      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+      await page.waitForTimeout(5000);
       const list = await page.$$eval(
         '[class*="friend"] a[href*="qzone.qq.com"]',
         (links: Element[]) => {
