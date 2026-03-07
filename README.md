@@ -30,6 +30,7 @@ QQ空间 → OneBot v11 协议桥接服务（TypeScript 原生实现）。
 - 图片 URL 提取优先级：`url2` → `url3` → `url1` → `smallurl`（高清优先）
 - feeds3 LRU 缓存采用 O(1) Map 插入序逐出
 - 可选 Playwright 提取 `qzonetoken`
+- 服务器环境自动 headless 检测（`$DISPLAY`），系统 Chrome 自动发现
 
 ### 运行时校验 & 防御层
 
@@ -76,6 +77,11 @@ QZONE_COOKIE_STRING=uin=o你的QQ; p_uin=o你的QQ; skey=xxx; p_skey=yyy
 # QZONE_ENABLE_QR=1   # 不填 Cookie 时可设为 1，启动后扫 test_cache/qrcode.png
 
 QZONE_CACHE_PATH=./test_cache
+
+# Playwright 配置（可选）
+# QZONE_PLAYWRIGHT_HEADLESS=    # 空=自动检测, 1=强制headless, 0=强制headed
+# QZONE_PLAYWRIGHT_EXECUTABLE=  # 自定义 Chrome 路径
+# QZONE_PLAYWRIGHT_CHANNEL=chrome
 ```
 
 详细登录步骤见下方 [如何登录](#如何登录)。
@@ -134,7 +140,11 @@ Content-Type: application/json
 
 未配置 Cookie 或 Cookie 失效时，若开启二维码登录，会通过 Playwright 启动真实浏览器生成二维码。
 
-> **前置要求**：本机需安装 Chrome 或 Edge 浏览器，或通过 `QZONE_PLAYWRIGHT_EXECUTABLE` 指定浏览器路径。
+> **前置要求**：本机需安装 Chrome 或 Edge 浏览器。程序会按以下顺序查找：
+> 1. `QZONE_PLAYWRIGHT_EXECUTABLE` 环境变量指定的路径
+> 2. `QZONE_PLAYWRIGHT_CHANNEL`（默认 `chrome`）
+> 3. 系统 Chrome（自动检测 `/usr/bin/google-chrome-stable` 等常见路径）
+> 4. Playwright 内置 Chromium（需 `npx playwright install chromium`）
 
 1. 在 `.env` 中设置：
 
@@ -144,8 +154,28 @@ QZONE_ENABLE_QR=1
 
 2. 启动服务：`npm run dev`
 3. 打开 **缓存目录下的二维码图片**（默认 `test_cache/qrcode.png`），用手机 QQ 扫一扫。
-   - 服务器环境下图片每 10 秒自动刷新，直接传输该文件即可。
+   - 日志中会打印二维码文件的**绝对路径**，方便在服务器上定位。
+   - 图片每 10 秒自动刷新，5 分钟内有效。
 4. 扫码成功后 Cookie 会写入 `test_cache/cookies.json`，下次启动自动复用。
+
+#### 服务器/无头环境
+
+在没有图形桌面的服务器上，程序会自动检测 `$DISPLAY` 环境变量：
+
+- **无 `$DISPLAY`**：自动切换为 headless 模式，二维码保存到文件，通过 `scp`/SFTP 等方式下载扫描。
+- **有 Xvfb**：设置 `DISPLAY=:99 npm run dev` 即可在虚拟显示器中运行有头浏览器。
+- **强制控制**：设置 `QZONE_PLAYWRIGHT_HEADLESS=1` 强制 headless，或 `=0` 强制 headed。
+
+```bash
+# 服务器典型用法（自动 headless）
+npm run dev
+
+# 使用 Xvfb 虚拟显示器
+DISPLAY=:99 npm run dev
+
+# 强制 headless
+QZONE_PLAYWRIGHT_HEADLESS=1 npm run dev
+```
 
 ---
 
