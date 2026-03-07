@@ -120,8 +120,12 @@ export function createApp(
   });
 
   // WebSocket: universal API + Event
-  function attachWss(path: string | null, apiRole: boolean, eventRole: boolean): WebSocketServer {
-    const wss = new WebSocketServer({ server, path: path ?? undefined });
+  // Use noServer mode to avoid path-match conflicts between multiple WSS instances
+  const wssByPath = new Map<string, { wss: WebSocketServer; apiRole: boolean; eventRole: boolean }>();
+
+  function attachWss(path: string, apiRole: boolean, eventRole: boolean): WebSocketServer {
+    const wss = new WebSocketServer({ noServer: true });
+    wssByPath.set(path, { wss, apiRole, eventRole });
     const connectedClients = new Set<WebSocket>();
 
     if (eventRole) {
@@ -174,6 +178,19 @@ export function createApp(
   const wssApi      = attachWss('/api', true, false);
   const wssEvent    = attachWss('/event', false, true);
   const wssWs       = attachWss('/ws', true, true);
+
+  server.on('upgrade', (req, socket, head) => {
+    const pathname = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`).pathname;
+    const entry = wssByPath.get(pathname);
+    if (!entry) {
+      socket.write('HTTP/1.1 404 Not Found\r\n\r\n');
+      socket.destroy();
+      return;
+    }
+    entry.wss.handleUpgrade(req, socket, head, (ws) => {
+      entry.wss.emit('connection', ws, req);
+    });
+  });
 
   function start(): void {
     server.on('error', (err: NodeJS.ErrnoException) => {

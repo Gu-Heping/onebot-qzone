@@ -492,7 +492,7 @@ export class QzoneClient {
 
       if (headless) {
         log('INFO', `请用手机 QQ 扫描二维码文件: ${absQrPath}`);
-        log('INFO', '二维码每 10 秒自动刷新，5 分钟内有效');
+        log('INFO', '扫码后请在手机上确认登录，等待自动跳转');
       } else {
         log('INFO', `浏览器已打开，请用手机 QQ 扫描屏幕上的二维码（文件: ${absQrPath}）`);
       }
@@ -500,14 +500,8 @@ export class QzoneClient {
       // 等待登录成功（页面会经历多级跳转：ptlogin → check_sig → loginsucc → qzone）
       const deadline = Date.now() + timeoutSeconds * 1000;
       let loggedIn = false;
-      let lastQrRefresh = Date.now();
-      const QR_REFRESH_INTERVAL = 10_000; // 每 10 秒刷新一次 QR 截图
 
       while (Date.now() < deadline) {
-        if (Date.now() - lastQrRefresh >= QR_REFRESH_INTERVAL) {
-          try { await this._saveQrCode(page, absQrPath); } catch { /* QR may have disappeared after scan */ }
-          lastQrRefresh = Date.now();
-        }
 
         const currentUrl = page.url();
         // 用 URL 的 pathname+host 来判断，避免 s_url 参数里的 loginsucc/qzone 字样误匹配
