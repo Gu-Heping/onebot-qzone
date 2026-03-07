@@ -1100,19 +1100,26 @@ export class QzoneClient {
     count = 0,
     externparam = '',
     uinlist?: string,
+    filter = 'all',
+    applist = 'all',
   ): Promise<string> {
     // externparam 翻页时需要不同的缓存 key；uinlist 指定「只看某用户」时也要区分
     const cacheKey = externparam
       ? `${uin}_${scope}_page_${externparam.substring(0, 30)}`
       : uinlist
         ? `${uin}_${scope}_${count}_ul_${uinlist}`
-        : `${uin}_${scope}_${count}`;
+        : `${uin}_${scope}_${count}_f${filter}`;
     const now = Date.now() / 1000;
     if (!forceRefresh && this.feeds3Cache.has(cacheKey)) {
       if (now - (this.feeds3CacheTime.get(cacheKey) ?? 0) < this.feeds3CacheTtl) {
         return this.feeds3Cache.get(cacheKey)!;
       }
     }
+
+    // 从 externparam（翻页 cursor）里同步 pagenum 和 basetime → begintime
+    // 浏览器请求结构：pagenum 在 URL 顶层 + externparam 里各出现一次，缺一不可
+    const epBasetime = externparam ? (new URLSearchParams(externparam).get('basetime') ?? '') : '';
+    const epPagenum  = externparam ? (new URLSearchParams(externparam).get('pagenum')  ?? '1') : '1';
 
     const params = new URLSearchParams({
       uin,
@@ -1122,13 +1129,25 @@ export class QzoneClient {
       uinlist: uinlist ?? '',
       gid: '',
       flag: '1',
-      filter: 'all',
-      applist: 'all',
-      refresh: '1',
-      aisession: '',
+      filter,
+      applist,
+      refresh: externparam ? '0' : '1',   // 首页 refresh=1，续页 refresh=0
+      aisortEndTime: '0',
+      aisortOffset: '0',
+      getAisort: '0',
+      aisortBeginTime: '0',
+      pagenum: epPagenum,                  // 顶层 pagenum 与 externparam 里保持一致
+      firstGetGroup: '0',
       icServerTime: '0',
-      alive498: '0',
-      sorttype: '0',
+      mixnocache: '0',
+      scene: '0',
+      begintime: epBasetime,               // = externparam 里的 basetime
+      dayspac: '5',                        // 往回查 5 天
+      sidomain: 'qzonestyle.gtimg.cn',
+      useutf8: '1',
+      outputhtmlfeed: '1',                 // 强制 HTML feed 格式，确保 feed_data 元素存在
+      rd: String(Math.random()),
+      usertime: String(Date.now()),
       g_tk: String(this.getGtk()),
       format: 'json',
     });
@@ -1169,15 +1188,16 @@ export class QzoneClient {
     filterUin?: string,
     filterAppid?: string,
     maxItems = 50,
+    skipFeedData = false,
   ): Record<string, unknown>[] {
-    return _parseFeeds3Items(text, filterUin, filterAppid, maxItems);
+    return _parseFeeds3Items(text, filterUin, filterAppid, maxItems, skipFeedData);
   }
 
   // ──────────────────────────────────────────────
   // Emotion list
   // ──────────────────────────────────────────────
   async getEmotionList(
-    uin?: string, pos = 0, num = 20, ftype = 0, sort = 0, replynum = 10,
+    uin?: string, pos = 0, num = 50, ftype = 0, sort = 0, replynum = 10, maxPages = 15,
   ): Promise<ApiResponse> {
     this.requireLogin();
     const targetUin = uin ?? this.qqNumber!;
@@ -1270,10 +1290,10 @@ export class QzoneClient {
     // 所有 HTTP API variant 都失败 → 直接 feeds3 fallback
     // NOTE: 不再启动 Playwright 浏览器拦截 API。Playwright 仅用于登录和静默续期。
     log('WARNING', 'emotion_cgi_msglist_v6 所有路径均失败，最终使用 feeds3 fallback');
-    return this.getEmotionListViaFeeds3(targetUin, num, pos);
+    return this.getEmotionListViaFeeds3(targetUin, num, pos, maxPages);
   }
 
-  private async getEmotionListViaFeeds3(uin: string, num = 20, pos = 0): Promise<ApiResponse> {
+  private async getEmotionListViaFeeds3(uin: string, num = 50, pos = 0, maxPages = 15): Promise<ApiResponse> {
     try {
       const isOwn = uin === this.qqNumber;
       let text: string;
@@ -1285,15 +1305,16 @@ export class QzoneClient {
       let useFilterFromStream = false;
 
       if (!isOwn) {
-        // 策略 0（指定用户优先）：拉好友动态流（与 getFriendFeeds 完全一致：同一 cacheKey、forceRefresh=false），再按目标 uin 过滤
-        // 使用 forceRefresh=false 与 getFriendFeeds 共用缓存，避免强制刷新拿到空响应并覆盖有效缓存
-        log('DEBUG', `feeds3 fallback: for friend uin=${uin}, trying scope=0 stream then filter by uin`);
-        text = await this.fetchFeeds3Html(this.qqNumber!, false, 0, 50);
+        // 策略 0（指定用户优先）：用 scope=1 综合好友流（~50+ 条），按目标 uin 过滤
+        // scope=1 返回条数远多于 scope=0（5条），能覆盖更多好友的近期帖子
+        log('DEBUG', `feeds3 fallback: for friend uin=${uin}, trying scope=1 stream then filter by uin`);
+        text = await this.fetchFeeds3Html(this.qqNumber!, false, 1, 50);
         const friends = this.extractFriendsFromFeeds3FromText(text);
         if (friends.length) this.mergeFriendCache(friends);
-        msglist = this.parseFeeds3Items(text, uin, undefined, pos + num);
+        // scope=1 的好友帖子在 JS 数组而非 feed_data → skipFeedData=true
+        msglist = this.parseFeeds3Items(text, uin, undefined, pos + num, true);
         if (msglist.length > 0) {
-          usedScope = 0;
+          usedScope = 1;
           useFilterFromStream = true;
         }
       } else {
@@ -1337,8 +1358,10 @@ export class QzoneClient {
 
       const seenTids = new Set(msglist.map(m => m['tid'] as string));
 
-      // 如果不够，尝试翻页（最多翻 3 页）
-      let remainingPages = 3;
+      // 如果不够，尝试翻页（最多 maxPages 页，每页约 50 条）
+      const cappedPages = Math.max(1, Math.min(30, maxPages));
+      let remainingPages = cappedPages;
+      if (cappedPages > 3) log('DEBUG', `feeds3 pagination: max_pages=${cappedPages}`);
       let currentText = text;
       while (msglist.length < pos + num && remainingPages > 0) {
         const externparam = this.extractExternparam(currentText);
@@ -1349,9 +1372,11 @@ export class QzoneClient {
         log('DEBUG', `feeds3 pagination: got ${msglist.length}, need ${pos + num}, scope=${usedScope}`);
         
         remainingPages--;
-        currentText = useFilterFromStream || useUinlist
-          ? await this.fetchFeeds3Html(this.qqNumber!, true, 0, 50, externparam, useUinlist ? uin : undefined)
-          : await this.fetchFeeds3Html(uin, true, usedScope, 50, externparam);
+        currentText = useFilterFromStream
+          ? await this.fetchFeeds3Html(this.qqNumber!, true, 1, 50, externparam)
+          : useUinlist
+            ? await this.fetchFeeds3Html(this.qqNumber!, true, 0, 50, externparam, uin)
+            : await this.fetchFeeds3Html(uin, true, usedScope, 50, externparam);
         allHtmlTexts.push(currentText);
         const page = this.parseFeeds3Items(currentText, uin, undefined, 50);
         
@@ -1428,25 +1453,38 @@ export class QzoneClient {
     return _extractExternparam(text);
   }
 
-  async getFriendFeeds(num = 20): Promise<ApiResponse> {
+  /**
+   * 获取好友说说动态（scope=0 filter=all，仅展示原创说说）。
+   * 使用完整的浏览器参数（outputhtmlfeed=1, pagenum, begintime, dayspac 等）使翻页正常工作。
+   * cursor 为上次返回的 externparam 字符串；首页不传。
+   * 通过 main.hasMoreFeeds 判断是否还有下一页。
+   */
+  async getFriendFeeds(cursor = '', num = 50): Promise<ApiResponse> {
     this.requireLogin();
     try {
-      // 优先 scope=0（好友动态流）
-      let text = await this.fetchFeeds3Html(this.qqNumber!, false, 0, 50);
-      let friends = this.extractFriendsFromFeeds3FromText(text);
+      const want = Math.max(1, Math.min(200, num));
+      const text = await this.fetchFeeds3Html(
+        this.qqNumber!, true, 0, 20, cursor,
+        undefined, 'all', 'all',
+      );
+      const friends = this.extractFriendsFromFeeds3FromText(text);
       if (friends.length) this.mergeFriendCache(friends);
-      let msglist = this.parseFeeds3Items(text, undefined, undefined, num);
 
-      // scope=0 可能返回 "need login" 导致 0 条 → 降级为 scope=1（自己的说说列表）
-      if (msglist.length === 0) {
-        log('DEBUG', 'getFriendFeeds: scope=0 returned 0, falling back to scope=1');
-        text = await this.fetchFeeds3Html(this.qqNumber!, true, 1, 50);
-        friends = this.extractFriendsFromFeeds3FromText(text);
-        if (friends.length) this.mergeFriendCache(friends);
-        msglist = this.parseFeeds3Items(text, undefined, undefined, num);
+      // 检查是否还有更多（main.hasMoreFeeds）
+      const hasMore = !/hasMoreFeeds\s*:\s*false/.test(text);
+      const nextCursor = hasMore ? _extractExternparam(text) : '';
+
+      // cursor 不推进 → 真到末尾
+      if (cursor && nextCursor === cursor) {
+        log('DEBUG', 'getFriendFeeds: cursor unchanged, marking end of feed');
+        return { code: 0, message: 'ok (end of feed)', msglist: [], next_cursor: '' };
       }
 
-      return { code: 0, message: 'ok', msglist };
+      // 过滤：只保留 appid=311 原创说说（排除点赞 appid=217 等）
+      const all = this.parseFeeds3Items(text, undefined, undefined, want, false);
+      const msglist = all.filter(item => String(item['appid'] ?? item['type'] ?? '311') === '311');
+      log('DEBUG', `getFriendFeeds: scope=0 found ${all.length} total → ${msglist.length} appid=311 posts, hasMore=${hasMore}`);
+      return { code: 0, message: 'ok', msglist: msglist.slice(0, want), next_cursor: nextCursor };
     } catch (exc) {
       log('ERROR', `friend feeds 获取失败: ${exc}`);
       return { code: -1, message: String(exc), msglist: [] };

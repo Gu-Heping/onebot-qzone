@@ -223,7 +223,7 @@ QZONE_PLAYWRIGHT_HEADLESS=1 npm run dev
 | `get_traffic_data` | 获取说说流量统计 | `user_id`, `tid` |
 | `set_emotion_privacy` | 设置说说隐私 | `tid`, `privacy`（`private`/`public`） |
 | `get_portrait` | 获取头像和昵称 | `user_id` |
-| `get_friend_feeds` | 获取好友说说流 | — |
+| `get_friend_feeds` | 获取好友动态（支持分页） | `pos`, `num`/`count`, `max_pages` |
 | `get_album_list` | 获取相册列表 | `user_id`（可选） |
 | `get_photo_list` | 获取照片列表 | `album_id` |
 | `upload_image` | 上传图片 | `base64` 或 `url` |

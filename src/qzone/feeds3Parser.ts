@@ -22,8 +22,9 @@ export function parseFeeds3Items(
   filterUin?: string,
   filterAppid?: string,
   maxItems = 50,
+  skipFeedData = false,
 ): Record<string, unknown>[] {
-  log('DEBUG', `parseFeeds3Items: text length=${text.length}, filterUin=${filterUin}, filterAppid=${filterAppid ?? '(any)'}, maxItems=${maxItems}`);
+  log('DEBUG', `parseFeeds3Items: text length=${text.length}, filterUin=${filterUin}, filterAppid=${filterAppid ?? '(any)'}, maxItems=${maxItems}, skipFeedData=${skipFeedData}`);
 
   const msglist: Record<string, unknown>[] = [];
   const seenTids = new Set<string>();
@@ -81,6 +82,8 @@ export function parseFeeds3Items(
       }
     }
 
+    // 指定用户时：必须同时满足 feed 块的 opuin（发布者）= filterUin，避免 feed_data 匹配错位导致混入他人内容
+    if (filterUin && (!matchedBlock || matchedBlock.opuin !== filterUin)) continue;
     if (filterAppid && matchedBlock && matchedBlock.appid !== filterAppid) continue;
 
     const searchAfter = text.substring(fdPos, Math.min(fdPos + 5000, text.length));
@@ -232,7 +235,9 @@ export function parseFeeds3Items(
   log('DEBUG', `parseFeeds3Items: feed_data strategy found ${msglist.length} items`);
 
   // ---- 策略 2：JS data 数组 fallback ----
-  if (msglist.length === 0) {
+  // skipFeedData=true 时强制走 JS 数组（如 scope=1 综合流：feed_data 段只有自己的帖子，JS 数组才有全部好友帖子）
+  if (msglist.length === 0 || skipFeedData) {
+    if (skipFeedData) { msglist.length = 0; seenTids.clear(); }
     log('DEBUG', 'parseFeeds3Items: feed_data strategy found 0, trying JS data array');
     const jsItemPat = /\{[^{}]*?appid:'(\d+)'[^{}]*?key:'([^']*)'[^{}]*?abstime:'(\d+)'[^{}]*?uin:'(\d+)'[^{}]*?nickname:'([^']*)'/g;
     let jsm: RegExpExecArray | null;
@@ -245,6 +250,7 @@ export function parseFeeds3Items(
 
       if (filterAppid && appid !== filterAppid) continue;
       if (feedUin === '0') continue;
+      if (filterUin && feedUin !== filterUin) continue;
       if (seenTids.has(tid)) continue;
       seenTids.add(tid);
 
@@ -315,7 +321,7 @@ export function parseFeeds3Items(
       return tb - ta;
     });
     log('DEBUG', `parseFeeds3Items: JS fallback found ${msglist.length} items`);
-  }
+  } // end JS fallback block
   return msglist;
 }
 
@@ -568,11 +574,19 @@ export function extractFriendsFromFeeds3FromText(
 
 // ── 翻页参数提取 ─────────────────────────────────
 
-/** 从 feeds3 响应中提取 externparam 翻页参数 */
+/** 从 feeds3 响应中提取 externparam 翻页参数（支持 JSON 包装或内联） */
 export function extractExternparam(text: string): string {
+  try {
+    const o = JSON.parse(text) as Record<string, unknown>;
+    const data = o?.data as Record<string, unknown> | undefined;
+    const v = (data?.externparam ?? o?.externparam) as string | undefined;
+    if (typeof v === 'string' && v.length > 0) return v;
+  } catch {
+    // 非 JSON 或解析失败，用正则
+  }
   const m = text.match(/externparam:'([^']+)'/);
   if (m) return m[1]!;
-  const m2 = text.match(/"externparam":"([^"]+)"/);
-  if (m2) return m2[1]!;
+  const m2 = text.match(/"externparam"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+  if (m2) return m2[1]!.replace(/\\"/g, '"');
   return '';
 }

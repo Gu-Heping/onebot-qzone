@@ -550,7 +550,7 @@ export class EventPoller {
     if (!this.client.loggedIn) return;
     const selfId = this.client.qqNumber!;
     try {
-      const res = await this.client.getFriendFeeds(20);
+      const res = await this.client.getFriendFeeds('', 20);
       const raw = Array.isArray(res['msglist']) ? (res['msglist'] as Record<string, unknown>[]) : [];
       for (const r of raw) {
         const item = normalizeEmotion(r, String(r['uin'] ?? ''));

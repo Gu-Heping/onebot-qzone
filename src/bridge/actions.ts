@@ -251,12 +251,22 @@ export class ActionHandler {
     return ok(res, echo);
   }
 
+  async action_get_feed_images(p: Record<string, unknown>, echo?: string): Promise<OneBotResponse> {
+    if (!this.client.loggedIn) return fail(1401, '未登录', echo);
+    const uin = String(p['user_id'] ?? this.client.qqNumber!);
+    const tid = String(p['tid'] ?? p['message_id'] ?? '');
+    if (!tid) return fail(1400, '缺少 tid', echo);
+    const urls = await this.client.getFeedImages(uin, tid);
+    return ok({ urls }, echo);
+  }
+
   async action_get_emotion_list(p: Record<string, unknown>, echo?: string): Promise<OneBotResponse> {
     if (!this.client.loggedIn) return fail(1401, '未登录', echo);
     const uin = p['user_id'] ? String(p['user_id']) : this.client.qqNumber!;
     const pos = safeInt(p['pos'] ?? 0);
-    const num = safeInt(p['num'] ?? 20);
-    const res = await this.client.getEmotionList(uin, pos, num);
+    const num = Math.max(1, Math.min(200, safeInt(p['num'] ?? 50)));
+    const maxPages = Math.max(1, Math.min(30, safeInt(p['max_pages'] ?? p['pages'] ?? 15)));
+    const res = await this.client.getEmotionList(uin, pos, num, undefined, undefined, undefined, maxPages);
     return ok(res, echo);
   }
 
@@ -462,9 +472,11 @@ export class ActionHandler {
     return ok(routes, echo);
   }
 
-  async action_get_friend_feeds(_p: Record<string, unknown>, echo?: string): Promise<OneBotResponse> {
+  async action_get_friend_feeds(p: Record<string, unknown>, echo?: string): Promise<OneBotResponse> {
     if (!this.client.loggedIn) return fail(1401, '未登录', echo);
-    const res = await this.client.getFriendFeeds(20);
+    const cursor = typeof p['cursor'] === 'string' ? p['cursor'] : '';
+    const num = Math.max(1, Math.min(200, safeInt(p['num'] ?? p['count'] ?? 50)));
+    const res = await this.client.getFriendFeeds(cursor, num);
     return ok(res, echo);
   }
 
