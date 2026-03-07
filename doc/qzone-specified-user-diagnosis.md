@@ -30,6 +30,6 @@
 ## 代码改动要点
 
 - 在 `getEmotionListViaFeeds3` 中，当 `!isOwn` 时：
-  - **优先**：用 `fetchFeeds3Html(this.qqNumber!, true, 0, 50)`（及翻页）拿到混合流，`parseFeeds3Items(..., targetUin, ...)` 过滤。
-  - 若有结果则直接使用并标记来源（如 `scope=0+filter`）。
-  - 若无结果再走原有策略 2（uinlist）、策略 3（scope=0 uin=目标）。
+  - **优先**：用 `fetchFeeds3Html(this.qqNumber!, false, 0, 50)`（与 getFriendFeeds 完全一致：**forceRefresh=false**，同一 cacheKey）拿到混合流，`parseFeeds3Items(..., targetUin, ...)` 过滤。
+  - **交叉验证 / Bug 修复**：策略 0 必须与 getFriendFeeds 共用缓存（forceRefresh=false）。若用 true，会强制刷新并可能用空响应覆盖有效缓存，导致「获取动态有数据、指定用户无」或反过来污染缓存。
+  - 若有结果则直接使用并标记来源（`scope=0+filter`）；若无结果再走策略 1/2/3。

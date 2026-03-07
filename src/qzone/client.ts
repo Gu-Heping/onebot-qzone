@@ -1285,9 +1285,10 @@ export class QzoneClient {
       let useFilterFromStream = false;
 
       if (!isOwn) {
-        // 策略 0（指定用户优先）：拉好友动态流（与 getFriendFeeds 一致），再按目标 uin 过滤 — 后端此路径有数据
+        // 策略 0（指定用户优先）：拉好友动态流（与 getFriendFeeds 完全一致：同一 cacheKey、forceRefresh=false），再按目标 uin 过滤
+        // 使用 forceRefresh=false 与 getFriendFeeds 共用缓存，避免强制刷新拿到空响应并覆盖有效缓存
         log('DEBUG', `feeds3 fallback: for friend uin=${uin}, trying scope=0 stream then filter by uin`);
-        text = await this.fetchFeeds3Html(this.qqNumber!, true, 0, 50);
+        text = await this.fetchFeeds3Html(this.qqNumber!, false, 0, 50);
         const friends = this.extractFriendsFromFeeds3FromText(text);
         if (friends.length) this.mergeFriendCache(friends);
         msglist = this.parseFeeds3Items(text, uin, undefined, pos + num);
