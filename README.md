@@ -13,7 +13,7 @@ QQ空间 → OneBot v11 协议桥接服务（TypeScript 原生实现）。
 | 类别 | 内容 |
 |------|------|
 | **说说** | 发布/删除/查看，支持图片上传（含相册）、视频提取 |
-| **互动** | 评论、点赞/取消点赞（三级 fallback）、转发 |
+| **互动** | 评论、点赞/取消点赞（feeds3 HTML 点赞详情 + 三级 fallback）、转发 |
 | **信息查询** | 访客列表（含来源映射）、好友列表、用户信息、头像/昵称、相册/照片管理 |
 | **流量统计** | 说说的点赞/浏览/评论/转发 计数（`qz_opcnt2`） |
 | **隐私管理** | 设置说说公开/私密权限（`ugc_right`） |
@@ -31,7 +31,9 @@ QQ空间 → OneBot v11 协议桥接服务（TypeScript 原生实现）。
   3. **getCommentsLite 单次 POST**：仅发一个 `emotion_cgi_getcmtreply_v6` POST，circuit breaker 保护（2 次失败后 30 分钟冷却）
   4. **纯计数事件**：前三级不可用时，发射仅含 +N 计数的事件
 - 评论/详情接口 `getCommentsBestEffort` 保留多变体轮询，记住命中变体下次优先使用（供 API 调用，非轮询器）
-- 点赞检测纯 `qz_opcnt2` 计数模式，不再调用已失效的 `getShuoshuoDetail` 链路
+- 点赞检测双重策略：feeds3 HTML 内嵌点赞者详情（QQ / 昵称 / 时间 / 个性赞图标）+ `qz_opcnt2` 计数兜底
+  - feeds3 HTML 解析出点赞者 QQ、昵称、时间、图标，事件推送可带详情
+  - feeds3 只覆盖最近点赞，剩余用计数事件补充
 - 点赞使用 `internal_dolike_app` → `like_cgi_likev6` → Mobile 三级 fallback
 - 图片 URL 提取优先级：`url2` → `url3` → `url1` → `smallurl`（高清优先）
 - feeds3 LRU 缓存采用 O(1) Map 插入序逐出
@@ -211,6 +213,9 @@ QZONE_PLAYWRIGHT_HEADLESS=1 npm run dev
 | `send_like` | 点赞说说 | `user_id`, `tid`, `abstime` |
 | `unlike` | 取消点赞 | `user_id`, `tid`, `abstime` |
 | `get_like_list` | 获取点赞列表 | `user_id`, `tid` |
+  - feeds3 HTML 解析模式：自动提取最近点赞者详情（QQ、昵称、时间、图标），无额外请求
+  - 详情事件推送：新点赞事件可带点赞者 QQ、昵称、时间、图标
+  - 计数模式：API不可用时只推送计数
 | `forward_msg` | 转发说说 | `user_id`, `tid`, `content` |
 | `get_friend_list` | 获取好友列表 | — |
 | `get_stranger_info` | 获取用户信息 | `user_id` |

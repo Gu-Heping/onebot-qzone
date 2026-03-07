@@ -413,6 +413,99 @@ export function parseFeeds3Comments(
   return result;
 }
 
+// ── feeds3 点赞提取 ─────────────────────────────
+
+/** feeds3 HTML 中解析出来的单条点赞 */
+export interface Feeds3Like {
+  uin: string;
+  nickname: string;
+  tid: string;
+  ownerUin: string;
+  abstime: number;
+  customItemId: string;
+  _source: 'feeds3_html';
+}
+
+/**
+ * 从 feeds3 HTML 中提取点赞详情。
+ *
+ * feeds3 的 feedstype="101" 项就是点赞通知，结构：
+ * - `<a href="http://user.qzone.qq.com/{likerUin}" link="nameCard_{likerUin}">{昵称}</a>`
+ * - `<i name="feed_data" data-tid="{postTid}" data-uin="{ownerUin}" data-feedstype="101" data-abstime="{timestamp}">`
+ * - `<img data-custom_itemid="{iconId}" class="f-like-icon">`
+ *
+ * 返回 Map<postTid, Feeds3Like[]>，按帖子分组。
+ * @param text  feeds3_html_more 原始文本（已 unescape）
+ */
+export function parseFeeds3Likes(
+  text: string,
+): Map<string, Feeds3Like[]> {
+  const result = new Map<string, Feeds3Like[]>();
+
+  // 匹配每个 feed item div 并提取 feed_data
+  const feedItemPat = /<div\s+class="f-item[^"]*f-item-passive"\s+id="feed_(\d+)_(\d+)_(\d+)_(\d+)_\d+_\d+"[\s\S]*?name="feed_data"\s*([^>]*)>[\s\S]*?(?=<div\s+class="f-item|<\/ul>|$)/g;
+  const dataAttr = (attrs: string, name: string): string => {
+    const m = attrs.match(new RegExp(`data-${name}="([^"]*)"`));
+    return m?.[1] ?? '';
+  };
+
+  let fm: RegExpExecArray | null;
+  while ((fm = feedItemPat.exec(text)) !== null) {
+    const feedDataAttrs = fm[5]!;
+    const feedstype = dataAttr(feedDataAttrs, 'feedstype');
+    if (feedstype !== '101') continue;
+
+    const likerUin = fm[1]!;
+    const tid = dataAttr(feedDataAttrs, 'tid');
+    const ownerUin = dataAttr(feedDataAttrs, 'uin');
+    const abstime = parseInt(dataAttr(feedDataAttrs, 'abstime') || '0', 10);
+    if (!tid || !likerUin || likerUin === '0') continue;
+
+    // 提取昵称：在 feed item 之前的 user-info 区域
+    const blockStart = Math.max(0, fm.index - 600);
+    const preceding = text.substring(blockStart, fm.index);
+    let nickname = '';
+    const nickMatch = preceding.match(/link="nameCard_\d+"[^>]*>([^<]+)<\/a>/);
+    if (nickMatch) {
+      nickname = htmlUnescape(nickMatch[1]!.trim());
+    }
+
+    // 个性赞图标 ID
+    const blockContent = fm[0];
+    const customMatch = blockContent.match(/data-custom_itemid="(\d+)"/);
+    const customItemId = customMatch?.[1] ?? '';
+
+    const like: Feeds3Like = {
+      uin: likerUin,
+      nickname,
+      tid,
+      ownerUin,
+      abstime,
+      customItemId,
+      _source: 'feeds3_html',
+    };
+
+    if (!result.has(tid)) result.set(tid, []);
+    result.get(tid)!.push(like);
+  }
+
+  // 去重（同一 tid 下同一 uin 只保留最新）
+  for (const [tid, likes] of result) {
+    const byUin = new Map<string, Feeds3Like>();
+    for (const like of likes) {
+      const existing = byUin.get(like.uin);
+      if (!existing || like.abstime > existing.abstime) {
+        byUin.set(like.uin, like);
+      }
+    }
+    result.set(tid, [...byUin.values()]);
+  }
+
+  const total = [...result.values()].reduce((s, a) => s + a.length, 0);
+  log('DEBUG', `parseFeeds3Likes: found ${total} likes for ${result.size} posts`);
+  return result;
+}
+
 // ── feeds3 好友提取 ─────────────────────────────
 
 /**

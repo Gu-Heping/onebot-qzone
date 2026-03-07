@@ -570,6 +570,11 @@ export class EventPoller {
       log('DEBUG', `[Poller] feeds3 内嵌评论: ${this.client.feeds3Comments.size} 条说说有评论`);
     }
 
+    // 同步 feeds3 HTML 中解析出的点赞缓存（pollLikes 直接读 client.feeds3Likes）
+    if (this.client.feeds3Likes.size > 0) {
+      log('DEBUG', `[Poller] feeds3 内嵌点赞: ${this.client.feeds3Likes.size} 条说说有点赞`);
+    }
+
     for (const item of items) {
       if (!item.tid) continue;
       if (!this.seenPostTids.has(item.tid)) {
@@ -730,13 +735,11 @@ export class EventPoller {
   }
 
   /**
-   * 点赞检测 — 纯 qz_opcnt2 计数模式
+   * 点赞检测 — feeds3 详情 + qz_opcnt2 计数 双重策略
    *
-   * 旧链路: getLikeList → getShuoshuoDetail (15+ 变体) → 全失败 → qz_opcnt2
-   * 新链路: qz_opcnt2 (1 次) → 直接发射计数事件
-   *
-   * getLikeList 依赖 getShuoshuoDetail 提取 like 数组，后者的 PC/Mobile 端点
-   * 目前全部返回 -10000 或 404，不再浪费请求。
+   * 1. qz_opcnt2 计数检测（低成本，精确 delta）
+   * 2. 计数变化时，优先从 feeds3Likes 缓存取详情（零额外请求）
+   * 3. feeds3 缓存不足时，发射计数事件兜底
    */
   private async pollLikes(selfUin: string, tid: string): Promise<void> {
     try {
@@ -746,7 +749,14 @@ export class EventPoller {
 
       const prev = this.knownCounts.get(tid);
       if (!prev) {
+        // 初始化计数 + 种子 feeds3 点赞
         this.knownCounts.set(tid, { comment: traffic.comment, like: count });
+        const cached = this.client.feeds3Likes.get(tid);
+        if (cached) {
+          if (!this.seenLikeUins.has(tid)) this.seenLikeUins.set(tid, new Set());
+          const seen = this.seenLikeUins.get(tid)!;
+          for (const like of cached) seen.add(like.uin);
+        }
         return;
       }
 
@@ -754,6 +764,47 @@ export class EventPoller {
       prev.like = count;
       if (delta <= 0) return;
 
+      // 尝试从 feeds3 缓存获取点赞者详情
+      const cached = this.client.feeds3Likes.get(tid);
+      if (cached && cached.length > 0) {
+        if (!this.seenLikeUins.has(tid)) this.seenLikeUins.set(tid, new Set());
+        const seen = this.seenLikeUins.get(tid)!;
+        let emitted = 0;
+
+        // 按时间降序（最新优先）
+        const sorted = [...cached].sort((a, b) => b.abstime - a.abstime);
+        for (const like of sorted) {
+          if (seen.has(like.uin)) continue;
+          seen.add(like.uin);
+          if (emitted >= delta) break;
+          const event = buildLikeEvent(
+            { uin: like.uin, nickname: like.nickname, createdTime: like.abstime },
+            selfUin, tid, selfUin,
+          );
+          await this.hub.publish(event);
+          emitted++;
+        }
+
+        if (emitted > 0) {
+          log('INFO', `[Poller] ✦ 新点赞(feeds3): tid=${tid.slice(0, 12)}… +${emitted}`);
+          // feeds3 可能覆盖不全，剩余 delta 用计数事件补充
+          const remaining = delta - emitted;
+          if (remaining > 0) {
+            const capped = Math.min(remaining, 10);
+            for (let i = 0; i < capped; i++) {
+              const event = buildLikeEvent(
+                { uin: '', nickname: '', createdTime: now() },
+                selfUin, tid, selfUin,
+              );
+              await this.hub.publish(event);
+            }
+            log('INFO', `[Poller] ✦ 新点赞(计数补充): tid=${tid.slice(0, 12)}… +${remaining}`);
+          }
+          return;
+        }
+      }
+
+      // feeds3 缓存不可用 — 纯计数事件
       const capped = Math.min(delta, 10);
       for (let i = 0; i < capped; i++) {
         const event = buildLikeEvent(
@@ -764,7 +815,7 @@ export class EventPoller {
       }
       log('INFO', `[Poller] ✦ 新点赞(计数): tid=${tid.slice(0, 12)}… +${delta}`);
     } catch (err) {
-      log('DEBUG', `[Poller] 点赞计数检测失败 tid=${tid.slice(0, 12)}…: ${err}`);
+      log('DEBUG', `[Poller] 点赞检测失败 tid=${tid.slice(0, 12)}…: ${err}`);
     }
   }
 

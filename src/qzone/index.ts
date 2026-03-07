@@ -17,7 +17,8 @@ export { CACHE_TTL, HTTP_DEFAULTS, ANTI_CRAWL_PATTERNS, AUTH_FAILURE_CODES, RATE
 export { env } from './config/env.js';
 
 // Parsing / Helpers
-export { parseFeeds3Items, parseFeeds3Comments, extractFriendsFromFeeds3FromText, extractExternparam } from './feeds3Parser.js';
+export { parseFeeds3Items, parseFeeds3Comments, parseFeeds3Likes, extractFriendsFromFeeds3FromText, extractExternparam } from './feeds3Parser.js';
+export type { Feeds3Like } from './feeds3Parser.js';
 export { launchPlaywright } from './playwrightHelper.js';
 export type { PlaywrightHandle } from './playwrightHelper.js';
 

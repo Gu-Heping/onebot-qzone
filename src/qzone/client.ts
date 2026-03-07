@@ -25,9 +25,11 @@ import { env } from './config/env.js';
 import {
   parseFeeds3Items as _parseFeeds3Items,
   parseFeeds3Comments as _parseFeeds3Comments,
+  parseFeeds3Likes as _parseFeeds3Likes,
   extractFriendsFromFeeds3FromText as _extractFriendsFromFeeds3FromText,
   extractExternparam as _extractExternparam,
 } from './feeds3Parser.js';
+import type { Feeds3Like } from './feeds3Parser.js';
 import { launchPlaywright } from './playwrightHelper.js';
 
 // ──────────────────────────────────────────────
@@ -75,6 +77,9 @@ export class QzoneClient {
 
   /** feeds3 HTML 中解析出的评论：postTid → comment records（每次 getEmotionListViaFeeds3 刷新） */
   feeds3Comments = new Map<string, Record<string, unknown>[]>();
+
+  /** feeds3 HTML 中解析出的点赞：postTid → Feeds3Like[]（每次 getEmotionListViaFeeds3 刷新） */
+  feeds3Likes = new Map<string, Feeds3Like[]>();
 
   /** 好友缓存：uin -> { uin, nickname, avatar, lastSeen }，持久化到 friends.json */
   private friendCache: Map<string, { uin: string; nickname: string; avatar: string; lastSeen: number }> = new Map();
@@ -767,6 +772,7 @@ export class QzoneClient {
     this.feeds3Cache.clear();
     this.feeds3CacheTime.clear();
     this.feeds3Comments.clear();
+    this.feeds3Likes.clear();
   }
 
   // ──────────────────────────────────────────────
@@ -1326,6 +1332,24 @@ export class QzoneClient {
             }
           } else {
             this.feeds3Comments.set(tid, cmts);
+          }
+        }
+      }
+
+      // ── 解析并缓存 feeds3 内嵌点赞 ──
+      this.feeds3Likes.clear();
+      for (const htmlText of allHtmlTexts) {
+        const likes = _parseFeeds3Likes(htmlText);
+        for (const [tid, likeArr] of likes) {
+          const existing = this.feeds3Likes.get(tid);
+          if (existing) {
+            // 去重合并（同 tid 下同 uin 只保留最新）
+            const seenUins = new Set(existing.map(l => l.uin));
+            for (const l of likeArr) {
+              if (!seenUins.has(l.uin)) { seenUins.add(l.uin); existing.push(l); }
+            }
+          } else {
+            this.feeds3Likes.set(tid, [...likeArr]);
           }
         }
       }

@@ -2,6 +2,12 @@
 
 ## 1. 点赞说说
 
+### feeds3 HTML 点赞详情解析
+
+- feeds3_html_more 返回的 HTML 中嵌有最近点赞通知（点赞者 QQ / 昵称 / 时间 / 个性赞图标），无需额外请求
+- 解析结果自动用于事件推送和 get_like_list 接口
+- 只覆盖最近点赞，剩余用计数事件补充
+
 ### PC 端（主用）
 
 **接口**: `like_cgi_likev6`
@@ -247,3 +253,5577 @@
 | `cellid` | 说说 ID |
 | `comment_id` | 评论 ID |
 | `format` | `json` |
+
+---
+
+## 6. 获取点赞列表
+
+### PC 端（主用）
+
+**接口**: `get_like_list`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/get_like_list?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `user_id` | 用户 QQ 号 | |
+| `tid` | 说说 ID | |
+| `format` | 响应格式 | `json` |
+
+**行为**:
+
+- feeds3 HTML 解析模式：自动提取最近点赞者详情（QQ、昵称、时间、图标），无额外请求
+- 详情事件推送：新点赞事件可带点赞者 QQ、昵称、时间、图标
+- 计数模式：API不可用时只推送计数
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 7. 获取说说详情
+
+**接口**: `emotion_cgi_getmood`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmood?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 8. 获取说说列表
+
+**接口**: `emotion_cgi_getmoodlist`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodlist?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 9. 获取说说推荐
+
+**接口**: `emotion_cgi_getmoodrecommend`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommend?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 10. 获取说说推荐列表
+
+**接口**: `emotion_cgi_getmoodrecommendlist`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlist?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 11. 获取说说推荐详情
+
+**接口**: `emotion_cgi_getmoodrecommenddetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommenddetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 12. 获取说说推荐列表详情
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 13. 获取说说推荐列表详情（含点赞数）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 14. 获取说说推荐列表详情（含点赞者）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 15. 获取说说推荐列表详情（含点赞者、评论、推荐）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 16. 获取说说推荐列表详情（含点赞者、评论、推荐、计数）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 17. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 18. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 19. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 20. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 21. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 22. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 23. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 24. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 25. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 26. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 27. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 28. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 29. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 30. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 31. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 32. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 33. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 34. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 35. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 36. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 37. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 38. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 39. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 40. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 41. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 42. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 43. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 44. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 45. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 46. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 47. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 48. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 49. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 50. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 51. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 52. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 53. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 54. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 55. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 56. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 57. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 58. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 59. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 60. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 61. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 62. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 63. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 64. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 65. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 66. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 67. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 68. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 69. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 70. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 71. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 72. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 73. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 74. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 75. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 76. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 77. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 78. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 79. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 80. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 81. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 82. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 83. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 84. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 85. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 86. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 87. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 88. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 89. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 90. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 91. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 92. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 93. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 94. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 95. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 96. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 97. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 98. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 99. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 100. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 101. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 102. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 103. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 104. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 105. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 106. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 107. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 108. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 109. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 110. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 111. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 112. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ug
+
+---
+
+## 113. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 114. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 115. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 116. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 117. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 118. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 119. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 120. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 121. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 122. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 123. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 124. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 125. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 126. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 127. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 128. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 129. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 130. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 131. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 132. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 133. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 134. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 135. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 136. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 137. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 138. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 139. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 140. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 141. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 142. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 143. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 144. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 145. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 146. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 147. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 148. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 149. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 150. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 151. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 152. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 153. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 154. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 155. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 156. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 157. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 158. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 159. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 160. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 161. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 162. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 163. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 164. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 165. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 166. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 167. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 168. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 169. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 170. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 171. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 172. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 173. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 174. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 175. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 176. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 177. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 178. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 179. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 180. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 181. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 182. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 183. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 184. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 185. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 186. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 187. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 188. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 189. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 190. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` | |
+| `format` | 响应格式 | `json` |
+| `qzreferrer` | 来源页面 | |
+
+**响应**:
+
+```json
+{
+  "code": 0,
+  "message": "succ"
+}
+```
+
+> ⚠️ 注意：`emotion_cgi_addcomment_ugc` 接口已废弃，返回 `-10004` 参数错误。使用 `emotion_cgi_re_feeds` 替代。
+
+---
+
+## 191. 获取说说推荐列表详情（含点赞者、评论、推荐、计数、事件、HTML 解析、计数模式、详情推送、计数模式、详情推送、详情推送、详情推送、详情推送、详情推送）
+
+**接口**: `emotion_cgi_getmoodrecommendlistdetail`
+
+**URL**: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getmoodrecommendlistdetail?g_tk={gtk}`
+
+**方法**: POST
+
+**参数**:
+
+| 参数名 | 说明 | 示例值 |
+|--------|------|--------|
+| `hostUin` | 说说作者 QQ 号 | |
+| `topicId` | `{ouin}_{tid}` |
