@@ -1,4 +1,4 @@
-/* ─────────────────────────────────────────────
+﻿/* ─────────────────────────────────────────────
    QzoneClient – TypeScript 移植自 Python qzone_api/client.py
    ───────────────────────────────────────────── */
 
@@ -1618,6 +1618,32 @@ export class QzoneClient {
     } catch {
       return { code: -1, message: 'all comment methods failed' };
     }
+  }
+
+  /**
+   * 轻量评论获取 — 仅发一次 POST 请求，不穷举变体。
+   * 用于 Poller 在 qz_opcnt2 检测到增量后做可选富化，
+   * 降低触发 -10000 限流的概率（旧 getCommentsBestEffort 会尝试 15+ 变体）。
+   */
+  async getCommentsLite(uin: string, tid: string, num = 20): Promise<ApiResponse> {
+    this.requireLogin();
+    const postUrl = `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getcmtreply_v6?g_tk=${this.getGtk()}`;
+    const resp = await this.post(postUrl, {
+      data: new URLSearchParams({
+        uin, tid, num: String(num), pos: '0', format: 'json',
+        hostuin: this.qqNumber!, qzreferrer: this.getQzreferrer(),
+        t1_source: '1', t1_uin: uin, t1_tid: tid,
+      }),
+      headers: this.pcHeaders(this.getQzreferrer()),
+    });
+    this.dumpDebugPayload('comments_lite', resp.text);
+    const raw = resp.text.trim();
+    if (!raw) return { code: -1, _empty: true };
+    const payload = parseJsonp(raw) as ApiResponse;
+    if (payload && (payload['code'] === undefined || payload['code'] === 0)) {
+      return payload;
+    }
+    return payload ?? { code: -1, raw: raw.slice(0, 200) };
   }
 
   async getCommentsMobile(uin: string, tid: string, num = 20, pos = 0): Promise<ApiResponse> {

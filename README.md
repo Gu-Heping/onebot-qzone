@@ -17,7 +17,7 @@ QQ空间 → OneBot v11 协议桥接服务（TypeScript 原生实现）。
 | **信息查询** | 访客列表（含来源映射）、好友列表、用户信息、头像/昵称、相册/照片管理 |
 | **流量统计** | 说说的点赞/浏览/评论/转发 计数（`qz_opcnt2`） |
 | **隐私管理** | 设置说说公开/私密权限（`ugc_right`） |
-| **事件推送** | 新说说、新评论、新点赞实时上报（独立定时器）、好友说说订阅 |
+| **事件推送** | 新说说、新评论（含详情）、新点赞实时上报（独立定时器）、好友说说订阅 |
 | **Cookie 保活** | 每 10 分钟自动探活，失效及时告警 |
 | **OneBot v11** | HTTP API / WebSocket / 反向 WebSocket / HTTP POST |
 | **NapCat 原生** | `napcat-plugin/` 提供无侵入代理插件 |
@@ -25,7 +25,12 @@ QQ空间 → OneBot v11 协议桥接服务（TypeScript 原生实现）。
 ### 反限流 & 智能路由
 
 - `emotion_cgi_msglist_v6` 被限流（-10000）时自动降级到 `feeds3_html_more`
-- 评论/详情接口多变体轮询，记住命中变体下次优先使用，全失败后 5 分钟冷却
+- 评论详情获取三级策略：
+  1. **emotionList 内嵌评论**：`emotion_cgi_msglist_v6` 返回说说时已携带 `commentlist`，零额外请求
+  2. **getCommentsLite 单次 POST**：仅发一个 `emotion_cgi_getcmtreply_v6` POST，不穷举变体，降低触发限流概率
+  3. **纯计数事件**：前两级不可用时，发射仅含 +N 计数的事件（circuit breaker 保护，2 次失败后 30 分钟冷却）
+- 评论/详情接口 `getCommentsBestEffort` 保留多变体轮询，记住命中变体下次优先使用（供 API 调用，非轮询器）
+- 点赞检测纯 `qz_opcnt2` 计数模式，不再调用已失效的 `getShuoshuoDetail` 链路
 - 点赞使用 `internal_dolike_app` → `like_cgi_likev6` → Mobile 三级 fallback
 - 图片 URL 提取优先级：`url2` → `url3` → `url1` → `smallurl`（高清优先）
 - feeds3 LRU 缓存采用 O(1) Map 插入序逐出
@@ -318,9 +323,6 @@ doc/                       # QZone 逆向分析文档
 ├── user-api.md            # 用户信息接口
 ├── fallback-strategy.md   # 降级策略
 └── compatibility-matrix.md # 接口可用性矩阵
-
-plans/
-└── qzone-api-reverse.md   # 逆向工程计划
 ```
 
 ---
