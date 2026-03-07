@@ -2,7 +2,7 @@ import { QzoneClient } from '../qzone/client.js';
 import type { BridgeConfig } from './config.js';
 import { EventHub } from './hub.js';
 import { safeInt } from './utils.js';
-import { htmlUnescape, log } from '../qzone/utils.js';
+import { htmlUnescape } from '../qzone/utils.js';
 import { env } from '../qzone/config/env.js';
 import { AuthError, isQzoneError } from '../qzone/infra/errors.js';
 import pLimit from 'p-limit';
@@ -289,21 +289,9 @@ export class EventPoller {
   private seenLikeUins = new Map<string, Set<string>>();    // tid → uins
   private trackTids: Set<string> = new Set();
   private knownCounts = new Map<string, { comment: number; like: number }>();  // tid → counts from qz_opcnt2
-  /** emotionList 内嵌评论缓存：tid → raw comment records（每次 pollMyPosts 刷新） */
-  private emotionComments = new Map<string, Record<string, unknown>[]>();
   private lastError = 0;
   private backoff = 0;
   private statusOk = false;
-
-  // ── 初始化标志：首次轮询只做数据种子，不发射事件 ──
-  private postsInitialized = false;
-  private friendFeedsInitialized = false;
-
-  // ── 评论详情 API circuit breaker ──
-  private commentDetailFailCount = 0;
-  private commentDetailNextRetry = 0;  // epoch seconds
-  private static readonly DETAIL_FAIL_THRESHOLD = 2;
-  private static readonly DETAIL_COOLDOWN = 1800;  // 30 min
 
   constructor(
     private readonly client: QzoneClient,
@@ -362,8 +350,7 @@ export class EventPoller {
   private scheduleComments(delayMs: number): void {
     if (!this.running || !this.config.emitCommentEvents) return;
     this.commentTimer = setTimeout(async () => {
-      // 等待主轮询初始化完成（trackTids 填充后再开始评论轮询）
-      if (this.client.loggedIn && this.postsInitialized && this.trackTids.size > 0) {
+      if (this.client.loggedIn) {
         const selfId = this.client.qqNumber!;
         const limit = pLimit(3);
         await Promise.all([...this.trackTids].map(tid =>
@@ -377,8 +364,7 @@ export class EventPoller {
   private scheduleLikes(delayMs: number): void {
     if (!this.running || !this.config.emitLikeEvents) return;
     this.likeTimer = setTimeout(async () => {
-      // 等待主轮询初始化完成
-      if (this.client.loggedIn && this.postsInitialized && this.trackTids.size > 0) {
+      if (this.client.loggedIn) {
         const selfId = this.client.qqNumber!;
         const limit = pLimit(3);
         await Promise.all([...this.trackTids].map(tid =>
@@ -529,50 +515,22 @@ export class EventPoller {
     const source = this.config.eventPollSource;
     let items: NormalizedItem[] = [];
 
-    let rawMsglist: Record<string, unknown>[] = [];
-
     if (source === 'mobile' || source === 'auto') {
       try {
         const res = await this.client.getMobileMoodList(selfId, 0, 20);
-        rawMsglist = Array.isArray(res['data'])
+        const raw = Array.isArray(res['data'])
           ? (res['data'] as Record<string, unknown>[])
           : Array.isArray(res['msglist']) ? (res['msglist'] as Record<string, unknown>[]) : [];
-        items = rawMsglist.map(r => normalizeEmotion(r, selfId));
+        items = raw.map(r => normalizeEmotion(r, selfId));
       } catch { /* try pc */ }
     }
 
     if ((source === 'pc' || (source === 'auto' && items.length === 0))) {
       try {
         const res = await this.client.getEmotionList(selfId, 0, 20);
-        rawMsglist = Array.isArray(res['msglist']) ? (res['msglist'] as Record<string, unknown>[]) : [];
-        items = rawMsglist.map(r => normalizeEmotion(r, selfId));
+        const raw = Array.isArray(res['msglist']) ? (res['msglist'] as Record<string, unknown>[]) : [];
+        items = raw.map(r => normalizeEmotion(r, selfId));
       } catch { /* skip */ }
-    }
-
-    // 从 emotion list 响应中提取内嵌评论（零额外请求）
-    this.emotionComments.clear();
-    for (const msg of rawMsglist) {
-      const tid = String(msg['tid'] ?? '');
-      if (!tid) continue;
-      const cl = msg['commentlist'] ?? msg['comment_list'];
-      if (Array.isArray(cl) && cl.length > 0) {
-        this.emotionComments.set(tid, cl as Record<string, unknown>[]);
-      }
-    }
-
-    // 补充 feeds3 HTML 中解析出的评论（零额外请求 — HTML 已在 getEmotionList 中获取）
-    for (const [tid, cmts] of this.client.feeds3Comments) {
-      if (!this.emotionComments.has(tid) && cmts.length > 0) {
-        this.emotionComments.set(tid, cmts);
-      }
-    }
-    if (this.client.feeds3Comments.size > 0) {
-      log('DEBUG', `[Poller] feeds3 内嵌评论: ${this.client.feeds3Comments.size} 条说说有评论`);
-    }
-
-    // 同步 feeds3 HTML 中解析出的点赞缓存（pollLikes 直接读 client.feeds3Likes）
-    if (this.client.feeds3Likes.size > 0) {
-      log('DEBUG', `[Poller] feeds3 内嵌点赞: ${this.client.feeds3Likes.size} 条说说有点赞`);
     }
 
     for (const item of items) {
@@ -580,18 +538,9 @@ export class EventPoller {
       if (!this.seenPostTids.has(item.tid)) {
         this.seenPostTids.add(item.tid);
         this.trackTids.add(item.tid);
-        // 首次轮询只做数据种子，不发射事件（避免启动洪水）
-        if (this.postsInitialized) {
-          const event = buildPostEvent(item, selfId);
-          await this.hub.publish(event);
-          log('INFO', `[Poller] ✦ 新说说: tid=${item.tid.slice(0, 12)}… by ${item.uin} "${(item.content || '').slice(0, 30)}"`);
-        }
+        const event = buildPostEvent(item, selfId);
+        await this.hub.publish(event);
       }
-    }
-
-    if (!this.postsInitialized) {
-      this.postsInitialized = true;
-      log('INFO', `[Poller] 说说监听初始化完成: 已缓存 ${this.seenPostTids.size} 条，跟踪 ${this.trackTids.size} 个TID`);
     }
 
     this._pruneTrackingDicts(items.map(i => i.tid).filter((t): t is string => t !== null));
@@ -609,214 +558,97 @@ export class EventPoller {
         const key = `${item.uin}_${item.tid}`;
         if (!this.seenPostTids.has(key)) {
           this.seenPostTids.add(key);
-          // 首次轮询只做数据种子，不发射事件
-          if (this.friendFeedsInitialized) {
-            const event = buildPostEvent(item, selfId);
-            (event as Record<string, unknown>)['_from_friend'] = true;
-            await this.hub.publish(event);
-            log('INFO', `[Poller] ✦ 好友动态: tid=${item.tid.slice(0, 12)}… by ${item.uin} "${(item.content || '').slice(0, 30)}"`);
-          }
+          const event = buildPostEvent(item, selfId);
+          (event as Record<string, unknown>)['_from_friend'] = true;
+          await this.hub.publish(event);
         }
       }
-      if (!this.friendFeedsInitialized) {
-        this.friendFeedsInitialized = true;
-        log('INFO', `[Poller] 好友动态监听初始化完成: 已缓存 ${raw.length} 条`);
-      }
-    } catch (err) {
-      log('WARNING', `[Poller] 好友动态轮询失败: ${err}`);
-    }
+    } catch { /* skip */ }
   }
 
-  /**
-   * 评论检测 — 三级策略
-   *
-   * 1. qz_opcnt2 计数检测（1 次请求，可靠）
-   * 2. 计数变化时，优先从 emotionComments 缓存取详情（0 额外请求）
-   * 3. 缓存缺失时，getCommentsLite 单次 POST（circuit breaker 保护）
-   * 4. 全不可用时，发射纯计数事件
-   */
   private async pollComments(selfUin: string, tid: string): Promise<void> {
-    // 1. qz_opcnt2 计数检测（低成本、可靠）
-    let delta = 0;
-    try {
-      const traffic = await this.client.getTrafficData(selfUin, tid);
-      const count = traffic.comment;
-      if (count < 0) return; // qz_opcnt2 无数据
+    const res = await this.client.getCommentsBestEffort(selfUin, tid, 50, 0);
+    const rawComments: Record<string, unknown>[] = [];
 
-      const prev = this.knownCounts.get(tid);
-      if (!prev) {
-        this.knownCounts.set(tid, { comment: count, like: traffic.like });
-        log('DEBUG', `[Poller] 计数初始化: tid=${tid.slice(0, 12)}… comment=${count} like=${traffic.like}`);
-        return;
-      }
-
-      delta = count - prev.comment;
-      prev.comment = count;
-      if (delta <= 0) return;
-      log('INFO', `[Poller] 评论计数变化 +${delta}: tid=${tid.slice(0, 12)}…`);
-    } catch (err) {
-      log('DEBUG', `[Poller] qz_opcnt2 评论检测失败 tid=${tid.slice(0, 12)}…: ${err}`);
-      return;
-    }
-
-    // 2. 优先从 emotionComments 缓存提取详情（含 feeds3 HTML 解析结果，零额外请求）
-    const cached = this.emotionComments.get(tid);
-    if (cached && cached.length > 0) {
-      const emitted = await this._emitNewComments(cached, tid, selfUin, delta);
-      if (emitted > 0) {
-        const src = (cached[0] as Record<string, unknown>)?.['_source'] === 'feeds3_html' ? 'feeds3' : 'emotion缓存';
-        log('INFO', `[Poller] ✦ 新评论(${src}): tid=${tid.slice(0, 12)}… +${emitted}`);
-        return;
-      }
-    }
-
-    // 3. 缓存缺失 — getCommentsLite 单次 POST（circuit breaker 保护）
-    if (this.commentDetailNextRetry <= now()) {
-      try {
-        const res = await this.client.getCommentsLite(selfUin, tid, 50);
-        const rawComments = this._extractRawComments(res);
-        if (rawComments.length > 0) {
-          this.commentDetailFailCount = 0;
-          const emitted = await this._emitNewComments(rawComments, tid, selfUin, delta);
-          if (emitted > 0) {
-            log('INFO', `[Poller] ✦ 新评论(lite): tid=${tid.slice(0, 12)}… +${emitted}`);
-            return;
-          }
-        }
-      } catch { /* lite API failed */ }
-      this.commentDetailFailCount++;
-      if (this.commentDetailFailCount >= EventPoller.DETAIL_FAIL_THRESHOLD) {
-        this.commentDetailNextRetry = now() + EventPoller.DETAIL_COOLDOWN;
-        log('WARNING', `[Poller] 评论详情API连续${this.commentDetailFailCount}次失败，切换纯计数模式（${EventPoller.DETAIL_COOLDOWN / 60}分钟后重试）`);
-      }
-    }
-
-    // 4. 详情不可用 — 发射计数事件
-    const capped = Math.min(delta, 10);
-    for (let i = 0; i < capped; i++) {
-      const event = buildCommentEvent(
-        { commentId: `opcnt_${Date.now()}_${i}`, uin: '', nickname: '', content: '', createdTime: now() },
-        selfUin, tid, selfUin,
-      );
-      await this.hub.publish(event);
-    }
-    log('INFO', `[Poller] ✦ 新评论(计数): tid=${tid.slice(0, 12)}… +${delta}`);
-  }
-
-  /** 从 API 响应提取原始评论数组 */
-  private _extractRawComments(res: Record<string, unknown>): Record<string, unknown>[] {
     for (const key of ['commentlist', 'comment_list', 'data', 'comments']) {
       const v = res[key];
-      if (Array.isArray(v)) return v as Record<string, unknown>[];
+      if (Array.isArray(v)) { rawComments.push(...(v as Record<string, unknown>[])); break; }
     }
-    return [];
-  }
 
-  /** 去重并发射新评论事件，返回实际发射数 */
-  private async _emitNewComments(
-    rawComments: Record<string, unknown>[], tid: string, selfUin: string, maxEmit: number,
-  ): Promise<number> {
-    if (!this.seenCommentIds.has(tid)) this.seenCommentIds.set(tid, new Set());
-    const seen = this.seenCommentIds.get(tid)!;
-    const comments = rawComments.map(r => normalizeComment(r)).filter(c => c.commentId);
-    comments.sort((a, b) => b.createdTime - a.createdTime);
-    let emitted = 0;
-    for (const comment of comments) {
-      if (seen.has(comment.commentId)) continue;
-      seen.add(comment.commentId);
-      if (emitted < maxEmit) {
-        const event = buildCommentEvent(comment, selfUin, tid, selfUin);
-        await this.hub.publish(event);
-        log('INFO', `[Poller] ✦ 新评论: tid=${tid.slice(0, 12)}… by ${comment.uin} "${(comment.content || '').slice(0, 30)}"`);
-        emitted++;
+    if (rawComments.length > 0) {
+      for (const raw of rawComments) {
+        const comment = normalizeComment(raw);
+        if (!comment.commentId) continue;
+        if (!this.seenCommentIds.has(tid)) this.seenCommentIds.set(tid, new Set());
+        if (!this.seenCommentIds.get(tid)!.has(comment.commentId)) {
+          this.seenCommentIds.get(tid)!.add(comment.commentId);
+          const event = buildCommentEvent(comment, selfUin, tid, selfUin);
+          await this.hub.publish(event);
+        }
       }
+    } else {
+      await this.pollCountsDelta(selfUin, tid, 'comment');
     }
-    return emitted;
   }
 
-  /**
-   * 点赞检测 — feeds3 详情 + qz_opcnt2 计数 双重策略
-   *
-   * 1. qz_opcnt2 计数检测（低成本，精确 delta）
-   * 2. 计数变化时，优先从 feeds3Likes 缓存取详情（零额外请求）
-   * 3. feeds3 缓存不足时，发射计数事件兜底
-   */
   private async pollLikes(selfUin: string, tid: string): Promise<void> {
+    const rawLikes = await this.client.getLikeList(selfUin, tid);
+    if (rawLikes.length > 0) {
+      for (const raw of rawLikes) {
+        const like = normalizeLike(raw);
+        if (!like.uin) continue;
+        if (!this.seenLikeUins.has(tid)) this.seenLikeUins.set(tid, new Set());
+        if (!this.seenLikeUins.get(tid)!.has(like.uin)) {
+          this.seenLikeUins.get(tid)!.add(like.uin);
+          const event = buildLikeEvent(like, selfUin, tid, selfUin);
+          await this.hub.publish(event);
+        }
+      }
+    } else {
+      await this.pollCountsDelta(selfUin, tid, 'like');
+    }
+  }
+
+  private async pollCountsDelta(selfUin: string, tid: string, type: 'comment' | 'like'): Promise<void> {
     try {
       const traffic = await this.client.getTrafficData(selfUin, tid);
-      const count = traffic.like;
+      const count = type === 'comment' ? traffic.comment : traffic.like;
       if (count < 0) return;
 
       const prev = this.knownCounts.get(tid);
       if (!prev) {
-        // 初始化计数 + 种子 feeds3 点赞
-        this.knownCounts.set(tid, { comment: traffic.comment, like: count });
-        const cached = this.client.feeds3Likes.get(tid);
-        if (cached) {
-          if (!this.seenLikeUins.has(tid)) this.seenLikeUins.set(tid, new Set());
-          const seen = this.seenLikeUins.get(tid)!;
-          for (const like of cached) seen.add(like.uin);
-        }
+        this.knownCounts.set(tid, { comment: traffic.comment, like: traffic.like });
         return;
       }
 
-      const delta = count - prev.like;
-      prev.like = count;
-      if (delta <= 0) return;
+      const prevCount = type === 'comment' ? prev.comment : prev.like;
+      const delta = count - prevCount;
 
-      // 尝试从 feeds3 缓存获取点赞者详情
-      const cached = this.client.feeds3Likes.get(tid);
-      if (cached && cached.length > 0) {
-        if (!this.seenLikeUins.has(tid)) this.seenLikeUins.set(tid, new Set());
-        const seen = this.seenLikeUins.get(tid)!;
-        let emitted = 0;
-
-        // 按时间降序（最新优先）
-        const sorted = [...cached].sort((a, b) => b.abstime - a.abstime);
-        for (const like of sorted) {
-          if (seen.has(like.uin)) continue;
-          seen.add(like.uin);
-          if (emitted >= delta) break;
-          const event = buildLikeEvent(
-            { uin: like.uin, nickname: like.nickname, createdTime: like.abstime },
-            selfUin, tid, selfUin,
-          );
-          await this.hub.publish(event);
-          emitted++;
-        }
-
-        if (emitted > 0) {
-          log('INFO', `[Poller] ✦ 新点赞(feeds3): tid=${tid.slice(0, 12)}… +${emitted}`);
-          // feeds3 可能覆盖不全，剩余 delta 用计数事件补充
-          const remaining = delta - emitted;
-          if (remaining > 0) {
-            const capped = Math.min(remaining, 10);
-            for (let i = 0; i < capped; i++) {
-              const event = buildLikeEvent(
-                { uin: '', nickname: '', createdTime: now() },
-                selfUin, tid, selfUin,
-              );
-              await this.hub.publish(event);
-            }
-            log('INFO', `[Poller] ✦ 新点赞(计数补充): tid=${tid.slice(0, 12)}… +${remaining}`);
+      if (delta > 0) {
+        if (type === 'comment') {
+          prev.comment = count;
+          for (let i = 0; i < delta; i++) {
+            const event = buildCommentEvent(
+              { commentId: `opcnt_${Date.now()}_${i}`, uin: '', nickname: '', content: '', createdTime: now() },
+              selfUin, tid, selfUin,
+            );
+            await this.hub.publish(event);
           }
-          return;
+        } else {
+          prev.like = count;
+          for (let i = 0; i < delta; i++) {
+            const event = buildLikeEvent(
+              { uin: '', nickname: '', createdTime: now() },
+              selfUin, tid, selfUin,
+            );
+            await this.hub.publish(event);
+          }
         }
+      } else {
+        if (type === 'comment') prev.comment = count;
+        else prev.like = count;
       }
-
-      // feeds3 缓存不可用 — 纯计数事件
-      const capped = Math.min(delta, 10);
-      for (let i = 0; i < capped; i++) {
-        const event = buildLikeEvent(
-          { uin: '', nickname: '', createdTime: now() },
-          selfUin, tid, selfUin,
-        );
-        await this.hub.publish(event);
-      }
-      log('INFO', `[Poller] ✦ 新点赞(计数): tid=${tid.slice(0, 12)}… +${delta}`);
-    } catch (err) {
-      log('DEBUG', `[Poller] 点赞检测失败 tid=${tid.slice(0, 12)}…: ${err}`);
-    }
+    } catch { /* qz_opcnt2 also failed, skip */ }
   }
 
   private _pruneTrackingDicts(recentTids: string[], max = 100): void {
