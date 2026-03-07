@@ -26,9 +26,10 @@ QQ空间 → OneBot v11 协议桥接服务（TypeScript 原生实现）。
 
 - `emotion_cgi_msglist_v6` 被限流（-10000）时自动降级到 `feeds3_html_more`
 - 评论详情获取三级策略：
-  1. **emotionList 内嵌评论**：`emotion_cgi_msglist_v6` 返回说说时已携带 `commentlist`，零额外请求
-  2. **getCommentsLite 单次 POST**：仅发一个 `emotion_cgi_getcmtreply_v6` POST，不穷举变体，降低触发限流概率
-  3. **纯计数事件**：前两级不可用时，发射仅含 +N 计数的事件（circuit breaker 保护，2 次失败后 30 分钟冷却）
+  1. **feeds3 内嵌评论**：`feeds3_html_more` 返回的 HTML 中嵌有最近评论（评论者 QQ / 昵称 / 内容 / 时间），零额外请求
+  2. **emotionList 内嵌评论**：`emotion_cgi_msglist_v6` 返回说说时已携带 `commentlist`（API 限流降级到 feeds3 时不可用）
+  3. **getCommentsLite 单次 POST**：仅发一个 `emotion_cgi_getcmtreply_v6` POST，circuit breaker 保护（2 次失败后 30 分钟冷却）
+  4. **纯计数事件**：前三级不可用时，发射仅含 +N 计数的事件
 - 评论/详情接口 `getCommentsBestEffort` 保留多变体轮询，记住命中变体下次优先使用（供 API 调用，非轮询器）
 - 点赞检测纯 `qz_opcnt2` 计数模式，不再调用已失效的 `getShuoshuoDetail` 链路
 - 点赞使用 `internal_dolike_app` → `like_cgi_likev6` → Mobile 三级 fallback

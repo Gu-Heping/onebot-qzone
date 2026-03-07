@@ -560,6 +560,16 @@ export class EventPoller {
       }
     }
 
+    // 补充 feeds3 HTML 中解析出的评论（零额外请求 — HTML 已在 getEmotionList 中获取）
+    for (const [tid, cmts] of this.client.feeds3Comments) {
+      if (!this.emotionComments.has(tid) && cmts.length > 0) {
+        this.emotionComments.set(tid, cmts);
+      }
+    }
+    if (this.client.feeds3Comments.size > 0) {
+      log('DEBUG', `[Poller] feeds3 内嵌评论: ${this.client.feeds3Comments.size} 条说说有评论`);
+    }
+
     for (const item of items) {
       if (!item.tid) continue;
       if (!this.seenPostTids.has(item.tid)) {
@@ -644,12 +654,13 @@ export class EventPoller {
       return;
     }
 
-    // 2. 优先从 emotionComments 缓存提取详情（零额外请求）
+    // 2. 优先从 emotionComments 缓存提取详情（含 feeds3 HTML 解析结果，零额外请求）
     const cached = this.emotionComments.get(tid);
     if (cached && cached.length > 0) {
-      const emitted = this._emitNewComments(cached, tid, selfUin, delta);
+      const emitted = await this._emitNewComments(cached, tid, selfUin, delta);
       if (emitted > 0) {
-        log('INFO', `[Poller] ✦ 新评论(emotion缓存): tid=${tid.slice(0, 12)}… +${emitted}`);
+        const src = (cached[0] as Record<string, unknown>)?.['_source'] === 'feeds3_html' ? 'feeds3' : 'emotion缓存';
+        log('INFO', `[Poller] ✦ 新评论(${src}): tid=${tid.slice(0, 12)}… +${emitted}`);
         return;
       }
     }
@@ -661,7 +672,7 @@ export class EventPoller {
         const rawComments = this._extractRawComments(res);
         if (rawComments.length > 0) {
           this.commentDetailFailCount = 0;
-          const emitted = this._emitNewComments(rawComments, tid, selfUin, delta);
+          const emitted = await this._emitNewComments(rawComments, tid, selfUin, delta);
           if (emitted > 0) {
             log('INFO', `[Poller] ✦ 新评论(lite): tid=${tid.slice(0, 12)}… +${emitted}`);
             return;

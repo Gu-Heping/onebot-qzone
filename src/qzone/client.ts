@@ -24,6 +24,7 @@ import { CACHE_TTL, AUTH_FAILURE_CODES, USER_AGENTS } from './config/constants.j
 import { env } from './config/env.js';
 import {
   parseFeeds3Items as _parseFeeds3Items,
+  parseFeeds3Comments as _parseFeeds3Comments,
   extractFriendsFromFeeds3FromText as _extractFriendsFromFeeds3FromText,
   extractExternparam as _extractExternparam,
 } from './feeds3Parser.js';
@@ -71,6 +72,9 @@ export class QzoneClient {
   private feeds3Cache: Map<string, string> = new Map();
   private feeds3CacheTime: Map<string, number> = new Map();
   private feeds3CacheTtl = CACHE_TTL.feeds3;
+
+  /** feeds3 HTML 中解析出的评论：postTid → comment records（每次 getEmotionListViaFeeds3 刷新） */
+  feeds3Comments = new Map<string, Record<string, unknown>[]>();
 
   /** 好友缓存：uin -> { uin, nickname, avatar, lastSeen }，持久化到 friends.json */
   private friendCache: Map<string, { uin: string; nickname: string; avatar: string; lastSeen: number }> = new Map();
@@ -762,6 +766,7 @@ export class QzoneClient {
     this.detailAllFailTime = 0;
     this.feeds3Cache.clear();
     this.feeds3CacheTime.clear();
+    this.feeds3Comments.clear();
   }
 
   // ──────────────────────────────────────────────
@@ -1271,6 +1276,10 @@ export class QzoneClient {
         usedScope = 0;
       }
 
+      // ── 从 feeds3 HTML 中提取内嵌评论 ──
+      // 所有翻页的 HTML 都会累积到 allHtmlTexts 以合并评论
+      const allHtmlTexts: string[] = [text];
+
       const seenTids = new Set(msglist.map(m => m['tid'] as string));
 
       // 如果不够，尝试翻页（最多翻 3 页）
@@ -1286,6 +1295,7 @@ export class QzoneClient {
         
         remainingPages--;
         currentText = await this.fetchFeeds3Html(uin, true, usedScope, 50, externparam);
+        allHtmlTexts.push(currentText);
         const page = this.parseFeeds3Items(currentText, uin, undefined, 50);
         
         // 跨页去重
@@ -1300,6 +1310,24 @@ export class QzoneClient {
         }
         log('DEBUG', `feeds3 pagination: page returned ${page.length} items, ${added} new after dedup`);
         if (added === 0) break;
+      }
+
+      // ── 解析并缓存 feeds3 内嵌评论 ──
+      this.feeds3Comments.clear();
+      for (const htmlText of allHtmlTexts) {
+        const comments = _parseFeeds3Comments(htmlText);
+        for (const [tid, cmts] of comments) {
+          const existing = this.feeds3Comments.get(tid);
+          if (existing) {
+            // 去重合并（按 commentid）
+            const seenIds = new Set(existing.map(c => String(c['commentid'])));
+            for (const c of cmts) {
+              if (!seenIds.has(String(c['commentid']))) existing.push(c);
+            }
+          } else {
+            this.feeds3Comments.set(tid, cmts);
+          }
+        }
       }
 
       // 合并翻页后重新排序（最新在前）

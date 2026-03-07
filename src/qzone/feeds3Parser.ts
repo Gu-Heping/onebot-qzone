@@ -319,6 +319,100 @@ export function parseFeeds3Items(
   return msglist;
 }
 
+// ── feeds3 评论提取 ─────────────────────────────
+
+/** feeds3 HTML 中解析出来的单条评论 */
+export interface Feeds3Comment {
+  commentid: string;
+  uin: string;
+  name: string;
+  content: string;
+  createtime: number;
+  _source: 'feeds3_html';
+}
+
+/**
+ * 从 feeds3 HTML 中提取评论详情。
+ *
+ * feeds3 的评论嵌在 `<li class="comments-item">` 内，包含：
+ * - `data-tid`  = 评论 ID（数字）
+ * - `data-uin`  = 评论者 QQ
+ * - `data-nick` = 评论者昵称
+ * - 正文在 `<div class="comments-content">` 内
+ * - 时间在 `<span class="state">` 内
+ * - 所属说说 TID 在 `data-param` 的 `t1_tid=` 参数中
+ *
+ * 返回 Map<postTid, commentRecords[]>，可直接传给 normalizeComment()。
+ * @param text  feeds3_html_more 原始文本（已 unescape）
+ */
+export function parseFeeds3Comments(
+  text: string,
+): Map<string, Record<string, unknown>[]> {
+  const result = new Map<string, Record<string, unknown>[]>();
+
+  // 匹配每个 <li class="comments-item ..."> ... </li>
+  const itemPat = /<li\s+class="comments-item[^"]*"([^>]*)>([\s\S]*?)<\/li>/g;
+  let m: RegExpExecArray | null;
+
+  while ((m = itemPat.exec(text)) !== null) {
+    const attrs = m[1]!;
+    const body = m[2]!;
+
+    // data 属性提取
+    const commentId = attrs.match(/data-tid="([^"]*)"/) ?.[1] ?? '';
+    const uin       = attrs.match(/data-uin="([^"]*)"/) ?.[1] ?? '';
+    const nick      = attrs.match(/data-nick="([^"]*)"/) ?.[1] ?? '';
+    if (!commentId) continue;
+
+    // 找所属说说 TID：data-param 里的 t1_tid
+    const postTidMatch = body.match(/t1_tid=([a-f0-9]+)/);
+    const postTid = postTidMatch?.[1] ?? '';
+    if (!postTid) continue;
+
+    // 正文：nickname : TEXT<div ...
+    let content = '';
+    const contentMatch = body.match(
+      /<a\s+class="nickname[^"]*"[^>]*>[^<]*<\/a>(?:&nbsp;)?\s*:\s*([\s\S]*?)(?:<div\s+class="comments-op|$)/,
+    );
+    if (contentMatch) {
+      content = htmlUnescape(
+        contentMatch[1]!.replace(/<[^>]+>/g, ''),
+      ).trim();
+    }
+
+    // 时间：span.state — 可能是 "HH:MM"、"昨天 HH:MM" 或 "YYYY年M月D日"
+    let createdTime = Math.floor(Date.now() / 1000);
+    const timeMatch = body.match(/class="[^"]*\bstate\b[^"]*"[^>]*>\s*([^<]+)/);
+    if (timeMatch) {
+      const ts = timeMatch[1]!.trim();
+      const hm = ts.match(/(\d{1,2}):(\d{2})/);
+      if (hm) {
+        const d = new Date();
+        if (ts.includes('昨天')) d.setDate(d.getDate() - 1);
+        else if (ts.includes('前天')) d.setDate(d.getDate() - 2);
+        d.setHours(parseInt(hm[1]!, 10), parseInt(hm[2]!, 10), 0, 0);
+        createdTime = Math.floor(d.getTime() / 1000);
+      }
+    }
+
+    const comment: Record<string, unknown> = {
+      commentid: commentId,
+      uin,
+      name: nick,
+      content,
+      createtime: createdTime,
+      _source: 'feeds3_html',
+    };
+
+    if (!result.has(postTid)) result.set(postTid, []);
+    result.get(postTid)!.push(comment);
+  }
+
+  const total = [...result.values()].reduce((s, a) => s + a.length, 0);
+  log('DEBUG', `parseFeeds3Comments: found ${total} comments for ${result.size} posts`);
+  return result;
+}
+
 // ── feeds3 好友提取 ─────────────────────────────
 
 /**
