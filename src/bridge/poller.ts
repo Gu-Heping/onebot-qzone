@@ -288,6 +288,7 @@ export class EventPoller {
   private seenCommentIds = new Map<string, Set<string>>();  // tid → commentIds
   private seenLikeUins = new Map<string, Set<string>>();    // tid → uins
   private trackTids: Set<string> = new Set();
+  private knownCounts = new Map<string, { comment: number; like: number }>();  // tid → counts from qz_opcnt2
   private lastError = 0;
   private backoff = 0;
   private statusOk = false;
@@ -569,36 +570,85 @@ export class EventPoller {
     const res = await this.client.getCommentsBestEffort(selfUin, tid, 50, 0);
     const rawComments: Record<string, unknown>[] = [];
 
-    // 兼容多种返回结构
     for (const key of ['commentlist', 'comment_list', 'data', 'comments']) {
       const v = res[key];
       if (Array.isArray(v)) { rawComments.push(...(v as Record<string, unknown>[])); break; }
     }
 
-    for (const raw of rawComments) {
-      const comment = normalizeComment(raw);
-      if (!comment.commentId) continue;
-      if (!this.seenCommentIds.has(tid)) this.seenCommentIds.set(tid, new Set());
-      if (!this.seenCommentIds.get(tid)!.has(comment.commentId)) {
-        this.seenCommentIds.get(tid)!.add(comment.commentId);
-        const event = buildCommentEvent(comment, selfUin, tid, selfUin);
-        await this.hub.publish(event);
+    if (rawComments.length > 0) {
+      for (const raw of rawComments) {
+        const comment = normalizeComment(raw);
+        if (!comment.commentId) continue;
+        if (!this.seenCommentIds.has(tid)) this.seenCommentIds.set(tid, new Set());
+        if (!this.seenCommentIds.get(tid)!.has(comment.commentId)) {
+          this.seenCommentIds.get(tid)!.add(comment.commentId);
+          const event = buildCommentEvent(comment, selfUin, tid, selfUin);
+          await this.hub.publish(event);
+        }
       }
+    } else {
+      await this.pollCountsDelta(selfUin, tid, 'comment');
     }
   }
 
   private async pollLikes(selfUin: string, tid: string): Promise<void> {
     const rawLikes = await this.client.getLikeList(selfUin, tid);
-    for (const raw of rawLikes) {
-      const like = normalizeLike(raw);
-      if (!like.uin) continue;
-      if (!this.seenLikeUins.has(tid)) this.seenLikeUins.set(tid, new Set());
-      if (!this.seenLikeUins.get(tid)!.has(like.uin)) {
-        this.seenLikeUins.get(tid)!.add(like.uin);
-        const event = buildLikeEvent(like, selfUin, tid, selfUin);
-        await this.hub.publish(event);
+    if (rawLikes.length > 0) {
+      for (const raw of rawLikes) {
+        const like = normalizeLike(raw);
+        if (!like.uin) continue;
+        if (!this.seenLikeUins.has(tid)) this.seenLikeUins.set(tid, new Set());
+        if (!this.seenLikeUins.get(tid)!.has(like.uin)) {
+          this.seenLikeUins.get(tid)!.add(like.uin);
+          const event = buildLikeEvent(like, selfUin, tid, selfUin);
+          await this.hub.publish(event);
+        }
       }
+    } else {
+      await this.pollCountsDelta(selfUin, tid, 'like');
     }
+  }
+
+  private async pollCountsDelta(selfUin: string, tid: string, type: 'comment' | 'like'): Promise<void> {
+    try {
+      const traffic = await this.client.getTrafficData(selfUin, tid);
+      const count = type === 'comment' ? traffic.comment : traffic.like;
+      if (count < 0) return;
+
+      const prev = this.knownCounts.get(tid);
+      if (!prev) {
+        this.knownCounts.set(tid, { comment: traffic.comment, like: traffic.like });
+        return;
+      }
+
+      const prevCount = type === 'comment' ? prev.comment : prev.like;
+      const delta = count - prevCount;
+
+      if (delta > 0) {
+        if (type === 'comment') {
+          prev.comment = count;
+          for (let i = 0; i < delta; i++) {
+            const event = buildCommentEvent(
+              { commentId: `opcnt_${Date.now()}_${i}`, uin: '', nickname: '', content: '', createdTime: now() },
+              selfUin, tid, selfUin,
+            );
+            await this.hub.publish(event);
+          }
+        } else {
+          prev.like = count;
+          for (let i = 0; i < delta; i++) {
+            const event = buildLikeEvent(
+              { uin: '', nickname: '', createdTime: now() },
+              selfUin, tid, selfUin,
+            );
+            await this.hub.publish(event);
+          }
+        }
+      } else {
+        if (type === 'comment') prev.comment = count;
+        else prev.like = count;
+      }
+    } catch { /* qz_opcnt2 also failed, skip */ }
   }
 
   private _pruneTrackingDicts(recentTids: string[], max = 100): void {
