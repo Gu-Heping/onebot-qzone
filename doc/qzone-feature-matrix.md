@@ -50,7 +50,7 @@
 | 好友列表 | ✅ | cgi_get_friend_list + feeds3 提取 + 可选 Playwright | |
 | 访客列表 | ✅ | cgi_right_get_visitor_more | |
 | 个人资料/陌生人 | ✅ | cgi_personal_card | get_stranger_info |
-| 好友动态流 | ✅ | feeds3_html_more | get_friend_feeds |
+| 好友说说流（游标分页） | ✅ | feeds3_html_more scope=0 | get_friend_feeds（cursor/next_cursor） |
 
 ## 五、相册与图片
 

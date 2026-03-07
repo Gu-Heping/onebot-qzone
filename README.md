@@ -4,6 +4,8 @@ QQ空间 → OneBot v11 协议桥接服务（TypeScript 原生实现）。
 
 通过逆向 QZone Web API，将 QQ 空间的说说、评论、点赞等功能暴露为标准 [OneBot v11](https://github.com/botuniverse/onebot-11) 接口，并提供 **NapCat 原生插件** 以零配置接入 NapCat 生态。
 
+**相关项目**：[OpenClaw](https://github.com/openclaw/openclaw) 用户可搭配 [openclaw-napcat-qq](https://github.com/Gu-Heping/openclaw-napcat-qq) 插件，通过 Agent 工具（如 `qzone_get_friend_feeds`、`qzone_get_posts`）调用本桥接。
+
 > 本项目仅供学习交流，请勿用于非法用途。
 
 ---
@@ -223,7 +225,7 @@ QZONE_PLAYWRIGHT_HEADLESS=1 npm run dev
 | `get_traffic_data` | 获取说说流量统计 | `user_id`, `tid` |
 | `set_emotion_privacy` | 设置说说隐私 | `tid`, `privacy`（`private`/`public`） |
 | `get_portrait` | 获取头像和昵称 | `user_id` |
-| `get_friend_feeds` | 获取好友动态（支持分页） | `pos`, `num`/`count`, `max_pages` |
+| `get_friend_feeds` | 获取好友最近说说（游标分页） | `cursor`（可选，首页不传，续页传上次的 `next_cursor`）、`num`/`count`；仅返回 appid=311 说说 |
 | `get_album_list` | 获取相册列表 | `user_id`（可选） |
 | `get_photo_list` | 获取照片列表 | `album_id` |
 | `upload_image` | 上传图片 | `base64` 或 `url` |

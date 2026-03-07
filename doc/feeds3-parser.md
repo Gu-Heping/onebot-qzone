@@ -155,11 +155,20 @@ const pattern = new RegExp(
 | 好友动态 | 仅自己的说说 | ✅ 可获取好友动态 |
 | 解析复杂度 | 低（JSON） | 高（HTML 正则） |
 
+## 翻页（scope=0 好友说说流）
+
+好友说说接口 `getFriendFeeds(cursor?, num?)` 使用 **scope=0** + `filter=all` 请求 `feeds3_html_more`，翻页依赖以下机制：
+
+- **首页**：不传 cursor；请求需带浏览器侧参数：`outputhtmlfeed=1`、顶层 `pagenum`、`begintime`、`dayspac=5` 等，否则后端可能只返回一页或空。
+- **续页**：从上一页响应的 `main.externparam` 中解析 `basetime`、`pagenum`，作为本页的 `begintime` 与顶层 `pagenum` 传入；即 cursor 实为「上页的 externparam」。
+- **过滤**：解析后仅保留 **appid=311** 的条目（说说），其它应用类型不返回。
+- **是否有下一页**：根据响应中 `hasMoreFeeds` 及 cursor 是否推进判断。
+
 ## 指定用户（好友）说说的尝试
 
 在 PC 端 `emotion_cgi_msglist_v6` 被限流（如 -10000）时，获取**好友**的说说只能依赖 feeds3。feeds3 行为：
 
 - **scope=1**：个人说说；仅当 `uin` 为当前登录用户时后端通常有数据，对「好友 uin」常返回空（尤其 bot 账号）。
-- **scope=0**：好友动态流；以当前登录号请求时，部分环境（如 bot）会得到空或极短页面。
+- **scope=0**：好友动态流；以当前登录号请求时，需带完整翻页参数（见上节）才能稳定拿到多页；翻页需从响应 `main.externparam` 解析 `basetime`/`pagenum` 供下页请求使用。
 
-为尽量支持「指定好友说说」，fallback 时会额外尝试 **scope=0 + uinlist=目标好友**：以当前登录号拉取好友动态并传 `uinlist` 限定只含该好友。若 QQ 空间后端支持该参数过滤，则有机会在限流情况下仍拿到该好友的说说；若不支持，行为与未传 uinlist 一致。
+为尽量支持「指定好友说说」，fallback 时会额外尝试 **scope=0 + uinlist=目标好友**：以当前登录号拉取好友动态并传 `uinlist` 限定只含该好友。若 QQ 空间后端支持该参数过滤，则有机会在限流情况下仍拿到该好友的说说；若不支持，行为与未传 uinlist 一致。**推荐做法**：先拉 scope=0 好友说说流（与 getFriendFeeds 同源、游标翻页），再在内存中按 uin 过滤。

@@ -85,17 +85,17 @@
 
 ---
 
-## 5. 获取好友动态 feed
+## 5. 获取好友说说 feed（游标分页）
 
-好友动态的获取不通过专门的「好友动态」接口，而是通过 `feeds3_html_more` 实现：
+好友说说的获取通过 `feeds3_html_more` 实现，使用 **scope=0** + 完整翻页参数（`outputhtmlfeed=1`、`pagenum`、`begintime` 等），仅返回 **appid=311** 的说说。
 
 ```typescript
-// 不传 filterUin 参数即可获取好友动态（包含所有好友的说说）
-const text = await fetchFeeds3Html(myQQNumber);
-const feeds = parseFeeds3Items(text, undefined, '311', 20);
+// 首页：不传 cursor；续页：传上次返回的 next_cursor
+const result = await getFriendFeeds(cursor, num);  // cursor?: string, num?: number
+// result: { list, next_cursor, hasMore }
 ```
 
-详见 [feeds3-parser.md](feeds3-parser.md)。
+底层会从响应 `main.externparam` 解析 `basetime`、`pagenum` 供续页请求使用。详见 [feeds3-parser.md](feeds3-parser.md)。
 
 ### 移动端好友动态（已知不稳定）
 
