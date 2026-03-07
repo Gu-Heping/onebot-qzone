@@ -111,10 +111,10 @@ async function main(): Promise<void> {
     } catch { /* ignore */ }
 
     try {
-      const pubRes = await client.publish(`[bridge-healthcheck] ${new Date().toISOString()}`) as Record<string, unknown>;
+      const pubRes: unknown = await client.publish(`[bridge-healthcheck] ${new Date().toISOString()}`);
       let tid: string | undefined;
       if (Array.isArray(pubRes)) tid = pubRes[0] as string;
-      else tid = pubRes?.tid as string;
+      else if (pubRes && typeof pubRes === 'object') tid = (pubRes as Record<string, unknown>)?.tid as string;
       if (tid) {
         writeOk = true;
         try { await client.deleteEmotion(tid); } catch { /* cleanup failure ok */ }
