@@ -482,20 +482,13 @@ export class QzoneClient {
         '&pt_3rd_aid=0&hide_title_bar=1&hide_border=1';
 
       await page.goto(xloginUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+      await page.waitForTimeout(3000);
 
       // 保存 QR 码图片到磁盘
       const cacheDir = this.config.cachePath;
       if (!fs.existsSync(cacheDir)) fs.mkdirSync(cacheDir, { recursive: true });
       const absQrPath = path.resolve(this.qrcodePath);
-      try {
-        const qrImg = page.locator('#qrlogin_img, img[src*="ptqrshow"]').first();
-        await qrImg.waitFor({ state: 'visible', timeout: 10000 });
-        await qrImg.screenshot({ path: absQrPath });
-        log('INFO', `QR 码已保存到: ${absQrPath}`);
-      } catch {
-        await page.screenshot({ path: absQrPath });
-        log('INFO', `QR 码截图已保存到: ${absQrPath}（整页截图）`);
-      }
+      await this._saveQrCode(page, absQrPath);
 
       if (headless) {
         log('INFO', `请用手机 QQ 扫描二维码文件: ${absQrPath}`);
@@ -511,16 +504,8 @@ export class QzoneClient {
       const QR_REFRESH_INTERVAL = 10_000; // 每 10 秒刷新一次 QR 截图
 
       while (Date.now() < deadline) {
-        // 定期重新截图 QR 码，确保服务器环境访问到的始终是最新二维码
         if (Date.now() - lastQrRefresh >= QR_REFRESH_INTERVAL) {
-          try {
-            const qrImg = page.locator('#qrlogin_img, img[src*="ptqrshow"]').first();
-            const isVisible = await qrImg.isVisible().catch(() => false);
-            if (isVisible) {
-              await qrImg.screenshot({ path: absQrPath });
-              log('DEBUG', `QR 码截图已刷新: ${absQrPath}`);
-            }
-          } catch { /* QR element may have disappeared after scan */ }
+          try { await this._saveQrCode(page, absQrPath); } catch { /* QR may have disappeared after scan */ }
           lastQrRefresh = Date.now();
         }
 
@@ -613,6 +598,50 @@ export class QzoneClient {
   logout(): void {
     this.qqNumber = null;
     this.deleteCookies();
+  }
+
+  /**
+   * 保存 QR 码到文件。优先提取 img.src 直接下载（绕过截图字体渲染问题），
+   * 失败则尝试元素截图，最后回退到整页截图。
+   */
+  private async _saveQrCode(page: any, absQrPath: string): Promise<void> {
+    const selectors = '#qrlogin_img, img[src*="ptqrshow"]';
+
+    // 方案 1: 提取 QR 图片 src 直接下载（最可靠）
+    try {
+      const qrImg = page.locator(selectors).first();
+      await qrImg.waitFor({ state: 'visible', timeout: 15000 });
+      const src: string = await qrImg.getAttribute('src', { timeout: 5000 });
+      if (src && (src.startsWith('http') || src.startsWith('//'))) {
+        const imgUrl = src.startsWith('//') ? `https:${src}` : src;
+        const resp = await fetch(imgUrl, { signal: AbortSignal.timeout(10000) });
+        if (resp.ok) {
+          const buf = Buffer.from(await resp.arrayBuffer());
+          fs.writeFileSync(absQrPath, buf);
+          log('INFO', `QR 码已保存到: ${absQrPath}（直接下载）`);
+          return;
+        }
+      }
+    } catch { /* fall through */ }
+
+    // 方案 2: 元素截图
+    try {
+      const qrImg = page.locator(selectors).first();
+      const isVisible = await qrImg.isVisible().catch(() => false);
+      if (isVisible) {
+        await qrImg.screenshot({ path: absQrPath, timeout: 10000 });
+        log('INFO', `QR 码已保存到: ${absQrPath}（元素截图）`);
+        return;
+      }
+    } catch { /* fall through */ }
+
+    // 方案 3: 整页截图
+    try {
+      await page.screenshot({ path: absQrPath, timeout: 15000 });
+      log('INFO', `QR 码截图已保存到: ${absQrPath}（整页截图）`);
+    } catch {
+      log('WARNING', `QR 码截图全部失败，请手动访问缓存目录: ${path.dirname(absQrPath)}`);
+    }
   }
 
   // ──────────────────────────────────────────────
