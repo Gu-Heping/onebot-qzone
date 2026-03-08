@@ -40,6 +40,15 @@ export interface QzoneEmotion {
   [key: string]: unknown;
 }
 
+export interface PostMeta {
+  uin: string;
+  appid: string;
+  typeid: string;
+  likeUnikey: string;
+  likeCurkey: string;
+  abstime: number;
+}
+
 export interface NormalizedItem {
   tid: string | null;
   uin: string | null;

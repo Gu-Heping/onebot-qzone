@@ -16,7 +16,7 @@ import {
   htmlUnescape,
 } from './utils.js';
 import { saveCookies, loadCookies, deleteCookies } from './cookieStore.js';
-import type { ApiResponse, NormalizedItem, UploadImageResult, Routes } from './types.js';
+import type { ApiResponse, NormalizedItem, PostMeta, UploadImageResult, Routes } from './types.js';
 import { parseRawResponse, isGenuineSuccess, type ParsedApiResult } from './requestLayer.js';
 import { validateApiResponse } from './validate.js';
 import type { SchemaName } from './schemas.js';
@@ -80,6 +80,40 @@ export class QzoneClient {
 
   /** feeds3 HTML 中解析出的点赞：postTid → Feeds3Like[]（每次 getEmotionListViaFeeds3 刷新） */
   feeds3Likes = new Map<string, Feeds3Like[]>();
+
+  /**
+   * 帖子元数据缓存：tid → { uin, appid, typeid, likeUnikey, likeCurkey, abstime }
+   * 由 getFriendFeeds / getEmotionListViaFeeds3 / poller 填充，
+   * likeEmotion / commentEmotion 在缺失参数时自动查询。
+   */
+  readonly postMetaCache = new Map<string, PostMeta>();
+  private static readonly POST_META_CAPACITY = 1000;
+
+  cachePostMeta(tid: string, meta: PostMeta): void {
+    if (!tid) return;
+    this.postMetaCache.set(tid, meta);
+    if (this.postMetaCache.size > QzoneClient.POST_META_CAPACITY) {
+      const oldest = this.postMetaCache.keys().next().value;
+      if (oldest) this.postMetaCache.delete(oldest);
+    }
+  }
+
+  getPostMeta(tid: string): PostMeta | undefined {
+    return this.postMetaCache.get(tid);
+  }
+
+  /** 从 feeds3 解析结果（Record）中提取元数据并写入缓存 */
+  cachePostMetaFromRaw(item: Record<string, unknown>): void {
+    const tid = String(item['tid'] ?? '');
+    if (!tid) return;
+    const uin = String(item['uin'] ?? '');
+    const appid = String(item['appid'] ?? '311');
+    const typeid = String(item['typeid'] ?? '0');
+    const likeUnikey = String(item['likeUnikey'] ?? '');
+    const likeCurkey = String(item['likeCurkey'] ?? '');
+    const abstime = Number(item['created_time'] ?? item['createTime'] ?? 0);
+    this.cachePostMeta(tid, { uin, appid, typeid, likeUnikey, likeCurkey, abstime });
+  }
 
   /** 好友缓存：uin -> { uin, nickname, avatar, lastSeen }，持久化到 friends.json */
   private friendCache: Map<string, { uin: string; nickname: string; avatar: string; lastSeen: number }> = new Map();
@@ -1439,6 +1473,7 @@ export class QzoneClient {
 
       if (pos > 0) msglist = msglist.slice(pos);
       if (msglist.length > num) msglist = msglist.slice(0, num);
+      for (const item of msglist) this.cachePostMetaFromRaw(item);
       const scopeLabel = useFilterFromStream ? 'scope=0+filter' : useUinlist ? 'scope=0+uinlist' : `scope=${usedScope}`;
       log('INFO', `feeds3 fallback (${scopeLabel}) 获取到 ${msglist.length} 条说说`);
       return { code: 0, message: `ok (feeds3 fallback, ${scopeLabel})`, msglist, _source: 'feeds3' };
@@ -1485,6 +1520,7 @@ export class QzoneClient {
       const EXCLUDED_APPIDS = new Set(['217']);
       const all = this.parseFeeds3Items(text, undefined, undefined, want, false);
       const msglist = all.filter(item => !EXCLUDED_APPIDS.has(String(item['appid'] ?? '')));
+      for (const item of msglist) this.cachePostMetaFromRaw(item);
       log('DEBUG', `getFriendFeeds: scope=0 found ${all.length} total → ${msglist.length} posts (excl. activity), hasMore=${hasMore}`);
       return { code: 0, message: 'ok', msglist: msglist.slice(0, want), next_cursor: nextCursor };
     } catch (exc) {
@@ -1969,15 +2005,24 @@ export class QzoneClient {
   }
 
   /**
-   * 给帖子点赞。
-   * @param unikeyOverride  从 feeds3 HTML 提取的真实 unikey（app 分享为分享链接 URL）
-   * @param curkeyOverride  从 feeds3 HTML 提取的真实 curkey（`00{ouin}00{abstime}` 格式）
+   * 给帖子点赞。缺失参数时自动从 postMetaCache 补全。
    */
   async likeEmotion(
-    ouin: string, tid: string, abstime: number, appid = 311, typeid = 0,
+    ouin: string, tid: string, abstime: number, appid = 0, typeid = 0,
     unikeyOverride?: string, curkeyOverride?: string,
   ): Promise<ApiResponse> {
     this.requireLogin();
+    // 自动从缓存补全缺失参数
+    const meta = this.getPostMeta(tid);
+    if (meta) {
+      if (!ouin && meta.uin) ouin = meta.uin;
+      if (!appid && meta.appid) appid = Number(meta.appid) || 311;
+      if (!typeid && meta.typeid) typeid = Number(meta.typeid) || 0;
+      if (!abstime && meta.abstime) abstime = meta.abstime;
+      if (!unikeyOverride && meta.likeUnikey) unikeyOverride = meta.likeUnikey;
+      if (!curkeyOverride && meta.likeCurkey) curkeyOverride = meta.likeCurkey;
+    }
+    if (!appid) appid = 311;
     const unikey = unikeyOverride || this.buildUnikey(ouin, tid, appid);
     const curkey = curkeyOverride || unikey;
 
@@ -2011,10 +2056,20 @@ export class QzoneClient {
   }
 
   async unlikeEmotion(
-    ouin: string, tid: string, abstime: number, appid = 311, typeid = 0,
+    ouin: string, tid: string, abstime: number, appid = 0, typeid = 0,
     unikeyOverride?: string, curkeyOverride?: string,
   ): Promise<ApiResponse> {
     this.requireLogin();
+    const meta = this.getPostMeta(tid);
+    if (meta) {
+      if (!ouin && meta.uin) ouin = meta.uin;
+      if (!appid && meta.appid) appid = Number(meta.appid) || 311;
+      if (!typeid && meta.typeid) typeid = Number(meta.typeid) || 0;
+      if (!abstime && meta.abstime) abstime = meta.abstime;
+      if (!unikeyOverride && meta.likeUnikey) unikeyOverride = meta.likeUnikey;
+      if (!curkeyOverride && meta.likeCurkey) curkeyOverride = meta.likeCurkey;
+    }
+    if (!appid) appid = 311;
     const unikey = unikeyOverride || this.buildUnikey(ouin, tid, appid);
     const curkey = curkeyOverride || unikey;
 
@@ -2050,8 +2105,16 @@ export class QzoneClient {
     return safeDecodeJsonResponse(resp.data);
   }
 
-  async commentEmotion(ouin: string, tid: string, content: string, replyCommentId?: string, replyUin?: string, appid = 311, abstime = 0): Promise<ApiResponse> {
+  async commentEmotion(ouin: string, tid: string, content: string, replyCommentId?: string, replyUin?: string, appid = 0, abstime = 0): Promise<ApiResponse> {
     this.requireLogin();
+    // 自动从缓存补全缺失参数
+    const meta = this.getPostMeta(tid);
+    if (meta) {
+      if (!ouin && meta.uin) ouin = meta.uin;
+      if (!appid && meta.appid) appid = Number(meta.appid) || 311;
+      if (!abstime && meta.abstime) abstime = meta.abstime;
+    }
+    if (!appid) appid = 311;
 
     const shareUrl = `https://sns.qzone.qq.com/cgi-bin/qzshare/cgi_qzshareaddcomment?&g_tk=${this.getGtk()}`;
 

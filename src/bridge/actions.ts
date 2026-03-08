@@ -174,11 +174,12 @@ export class ActionHandler {
   // ── like ──────────────────────────────────────
   async action_send_like(p: Record<string, unknown>, echo?: string): Promise<OneBotResponse> {
     if (!this.client.loggedIn) return fail(1401, '未登录', echo);
-    const ouin = String(p['user_id'] ?? '');
     const tid = String(p['tid'] ?? '');
-    if (!ouin || !tid) return fail(1400, '缺少 user_id 或 tid', echo);
+    if (!tid) return fail(1400, '缺少 tid', echo);
+    // user_id 可选——缺失时由 client 从缓存补全
+    const ouin = String(p['user_id'] ?? '');
     const abstime = safeInt(p['abstime'] ?? 0);
-    const appid = safeInt(p['appid'] ?? 311) || 311;
+    const appid = safeInt(p['appid'] ?? 0);
     const typeid = safeInt(p['typeid'] ?? 0);
     const unikey = p['unikey'] ? String(p['unikey']) : undefined;
     const curkey = p['curkey'] ? String(p['curkey']) : undefined;
@@ -190,11 +191,11 @@ export class ActionHandler {
 
   async action_unlike(p: Record<string, unknown>, echo?: string): Promise<OneBotResponse> {
     if (!this.client.loggedIn) return fail(1401, '未登录', echo);
-    const ouin = String(p['user_id'] ?? '');
     const tid = String(p['tid'] ?? '');
-    if (!ouin || !tid) return fail(1400, '缺少 user_id 或 tid', echo);
+    if (!tid) return fail(1400, '缺少 tid', echo);
+    const ouin = String(p['user_id'] ?? '');
     const abstime = safeInt(p['abstime'] ?? 0);
-    const appid = safeInt(p['appid'] ?? 311) || 311;
+    const appid = safeInt(p['appid'] ?? 0);
     const typeid = safeInt(p['typeid'] ?? 0);
     const unikey = p['unikey'] ? String(p['unikey']) : undefined;
     const curkey = p['curkey'] ? String(p['curkey']) : undefined;
@@ -206,13 +207,14 @@ export class ActionHandler {
   // ── comment ───────────────────────────────────
   async action_send_comment(p: Record<string, unknown>, echo?: string): Promise<OneBotResponse> {
     if (!this.client.loggedIn) return fail(1401, '未登录', echo);
-    const ouin = String(p['target_uin'] ?? p['user_id'] ?? '');
     const tid = String(p['target_tid'] ?? p['tid'] ?? '');
     const content = String(p['content'] ?? '');
-    if (!ouin || !tid || !content) return fail(1400, '缺少 target_uin / target_tid / content', echo);
+    if (!tid || !content) return fail(1400, '缺少 tid / content', echo);
+    // user_id 可选——缺失时由 client 从缓存补全
+    const ouin = String(p['target_uin'] ?? p['user_id'] ?? '');
     const replyId = p['reply_comment_id'] ? String(p['reply_comment_id']) : undefined;
     const replyUin = p['reply_uin'] ? String(p['reply_uin']) : undefined;
-    const appid = safeInt(p['appid'] ?? 311) || 311;
+    const appid = safeInt(p['appid'] ?? 0);
     const abstime = safeInt(p['abstime'] ?? 0);
     const res = await this.client.commentEmotion(ouin, tid, content, replyId, replyUin, appid, abstime);
     if ((res as Record<string, unknown>)['code'] !== 0)

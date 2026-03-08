@@ -627,6 +627,7 @@ export class EventPoller {
 
     for (const item of items) {
       if (!item.tid) continue;
+      this.cacheNormalizedItem(item);
       if (!this.seenPostTids.has(item.tid)) {
         this.markSeenTid(item.tid);
         this.trackTids.add(item.tid);
@@ -647,6 +648,7 @@ export class EventPoller {
       for (const r of raw) {
         const item = normalizeEmotion(r, String(r['uin'] ?? ''));
         if (!item.tid || !item.uin) continue;
+        this.cacheNormalizedItem(item);
         const key = `${item.uin}_${item.tid}`;
         if (!this.seenPostTids.has(key)) {
           this.markSeenTid(key);
@@ -656,6 +658,18 @@ export class EventPoller {
         }
       }
     } catch { /* skip */ }
+  }
+
+  private cacheNormalizedItem(item: NormalizedItem): void {
+    if (!item.tid) return;
+    this.client.cachePostMeta(item.tid, {
+      uin: item.uin ?? '',
+      appid: item.appid ?? '311',
+      typeid: item.typeid ?? '0',
+      likeUnikey: item.likeUnikey ?? '',
+      likeCurkey: item.likeCurkey ?? '',
+      abstime: item.createdTime,
+    });
   }
 
   private async pollComments(selfUin: string, tid: string): Promise<void> {
