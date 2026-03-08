@@ -1209,7 +1209,30 @@ export class QzoneClient {
       `https://user.qzone.qq.com/proxy/domain/ic2.qzone.qq.com/cgi-bin/feeds/feeds3_html_more?${params.toString()}`;
     const resp = await this.get(url, { headers: this.pcHeaders(this.getQzreferrer()) });
     log('DEBUG', `feeds3 raw response length=${resp.text.length}, status=${resp.status}`);
-    let text = resp.text.replace(/\\x22/g, '"').replace(/\\x3C/g, '<').replace(/\\\//g, '/');
+    let text: string;
+    try {
+      const parsed = parseJsonp(resp.text) as Record<string, unknown> | undefined;
+      const dataArr = parsed?.data && typeof parsed.data === 'object' && Array.isArray((parsed.data as Record<string, unknown>).data)
+        ? (parsed.data as Record<string, unknown>).data as Array<Record<string, unknown>>
+        : null;
+      if (dataArr) {
+        const unescapeHtml = (s: string) => s.replace(/\\x22/g, '"').replace(/\\x3C/g, '<').replace(/\\\//g, '/');
+        const htmlPart = dataArr
+          .map((item) => unescapeHtml(String(item.html ?? '')))
+          .join('');
+        if (dataArr.length === 0) {
+          log('DEBUG', 'feeds3: data.data is empty (server returned no feed items, may be 风控 or scope)');
+        } else {
+          log('DEBUG', `feeds3: extracted html from ${dataArr.length} data.data items, combined length=${htmlPart.length}`);
+        }
+        // 前面保留原始 JSONP，便于 extractExternparam / hasMoreFeeds 从 main 取值；后面是拼接的 HTML 供 parseFeeds3Items 解析
+        text = resp.text + '\n<!--FEEDS_HTML-->\n' + htmlPart;
+      } else {
+        text = resp.text.replace(/\\x22/g, '"').replace(/\\x3C/g, '<').replace(/\\\//g, '/');
+      }
+    } catch {
+      text = resp.text.replace(/\\x22/g, '"').replace(/\\x3C/g, '<').replace(/\\\//g, '/');
+    }
     log('DEBUG', `feeds3 decoded text length=${text.length}`);
     // Dump to file for debug
     if (env.debugDump) {
