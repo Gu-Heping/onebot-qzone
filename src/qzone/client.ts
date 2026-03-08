@@ -102,6 +102,22 @@ export class QzoneClient {
     return this.postMetaCache.get(tid);
   }
 
+  /**
+   * 若传入的 tid 实为 abstime（纯数字），用 postMetaCache 反查对应的 key（hex tid），
+   * 评论接口 PC/mobile 需要 key 格式，用 abstime 会返回空或 -3。
+   */
+  resolveTidForComments(tid: string): string {
+    if (!tid || !/^\d+$/.test(tid)) return tid;
+    const abstime = Number(tid);
+    for (const [key, meta] of this.postMetaCache) {
+      if (meta.abstime === abstime) {
+        log('DEBUG', `resolveTidForComments: abstime ${tid} -> key ${key}`);
+        return key;
+      }
+    }
+    return tid;
+  }
+
   /** 从 feeds3 解析结果（Record）中提取元数据并写入缓存 */
   cachePostMetaFromRaw(item: Record<string, unknown>): void {
     const tid = String(item['tid'] ?? '');

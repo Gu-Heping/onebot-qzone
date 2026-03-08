@@ -288,8 +288,9 @@ export class ActionHandler {
   async action_get_comment_list(p: Record<string, unknown>, echo?: string): Promise<OneBotResponse> {
     if (!this.client.loggedIn) return fail(1401, '未登录', echo);
     const uin = String(p['user_id'] ?? this.client.qqNumber!);
-    const tid = String(p['tid'] ?? '');
-    if (!tid) return fail(1400, '缺少 tid', echo);
+    const tidRaw = String(p['tid'] ?? '');
+    if (!tidRaw) return fail(1400, '缺少 tid', echo);
+    const tid = this.client.resolveTidForComments(tidRaw);
     const num = safeInt(p['num'] ?? 20);
     const pos = safeInt(p['pos'] ?? 0);
     const res = await this.client.getCommentsBestEffort(uin, tid, num, pos);
@@ -299,8 +300,9 @@ export class ActionHandler {
   async action_get_like_list(p: Record<string, unknown>, echo?: string): Promise<OneBotResponse> {
     if (!this.client.loggedIn) return fail(1401, '未登录', echo);
     const uin = String(p['user_id'] ?? this.client.qqNumber!);
-    const tid = String(p['tid'] ?? '');
-    if (!tid) return fail(1400, '缺少 tid', echo);
+    const tidRaw = String(p['tid'] ?? '');
+    if (!tidRaw) return fail(1400, '缺少 tid', echo);
+    const tid = this.client.resolveTidForComments(tidRaw);
     const list = await this.client.getLikeList(uin, tid);
     return ok(list, echo);
   }
