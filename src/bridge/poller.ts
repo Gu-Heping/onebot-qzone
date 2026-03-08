@@ -565,7 +565,7 @@ export class EventPoller {
           this.client.logout();
           await this.client.loginWithCookieString(cookieStr);
           if (this.client.loggedIn) {
-            const valid = await this.client.validateSession();
+            const valid = await this.client.validateSession(true);
             if (valid) {
               console.error(`[Poller] 环境变量 Cookie 重登成功，QQ号: ${this.client.qqNumber}`);
               this.statusOk = true;

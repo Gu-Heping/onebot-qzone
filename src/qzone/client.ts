@@ -264,15 +264,18 @@ export class QzoneClient {
       const newCookie = this.getCookieString();
       if (!newCookie) return;
 
-      // 替换 QZONE_COOKIE=... 行
-      const re = /^QZONE_COOKIE=.*/m;
-      if (re.test(content)) {
-        content = content.replace(re, `QZONE_COOKIE=${newCookie}`);
-      } else {
+      // 同时替换 QZONE_COOKIE_STRING 和 QZONE_COOKIE，避免重启后优先读到过期的 QZONE_COOKIE_STRING
+      for (const key of ['QZONE_COOKIE_STRING', 'QZONE_COOKIE']) {
+        const re = new RegExp(`^${key}=.*`, 'm');
+        if (re.test(content)) {
+          content = content.replace(re, `${key}=${newCookie}`);
+        }
+      }
+      if (!/^QZONE_COOKIE=/m.test(content)) {
         content += `\nQZONE_COOKIE=${newCookie}\n`;
       }
       fs.writeFileSync(target, content, 'utf8');
-      log('INFO', '.env 文件 QZONE_COOKIE 已自动更新');
+      log('INFO', '.env 文件 QZONE_COOKIE / QZONE_COOKIE_STRING 已自动更新');
     } catch (e) {
       log('WARNING', `同步 Cookie 到 .env 失败: ${e}`);
     }
@@ -790,12 +793,16 @@ export class QzoneClient {
       this.lastRefreshTime = Date.now();
       this.resetApiCaches();
 
-      // 续期成功后自动写回 .env
-      this.syncCookieToEnvFile();
-
       const hasPskey = !!this.cookies['p_skey'];
       const hasSkey = !!this.cookies['skey'];
       log('INFO', `静默续期完成: ${updated} cookie(s) 更新, p_skey=${hasPskey ? '✓' : '✗'}, skey=${hasSkey ? '✓' : '✗'}`);
+
+      // 仅在续期完全成功（p_skey + skey 均存在）时才写回 .env，防止覆盖用户手动提供的有效 cookie
+      if (hasPskey && hasSkey) {
+        this.syncCookieToEnvFile();
+      } else {
+        log('WARNING', 'refreshSession: p_skey 缺失，不覆盖 .env（避免丢失用户提供的 cookie）');
+      }
       return hasPskey && hasSkey;
     } catch (exc) {
       log('WARNING', `refreshSession 失败: ${exc}`);
@@ -834,11 +841,12 @@ export class QzoneClient {
    * 依次尝试多种轻量探针，任一成功即认为有效。
    * 逻辑：快速探针 → 中量探针 → 重量级探针，early-return。
    */
-  async validateSession(): Promise<boolean> {
+  async validateSession(force = false): Promise<boolean> {
     if (!this.qqNumber) return false;
 
-    // 方法0: 如果 Cookie 刚保存不久（<5分钟），跳过网络校验直接信任
-    if (this.cookiesLastUsed) {
+    // 方法0: 如果 Cookie 刚经过网络验证不久（<5分钟），跳过探针
+    // force=true 时跳过此优化（用于 loginWithCookieString 后的首次校验）
+    if (!force && this.cookiesLastUsed) {
       const ageMs = Date.now() - this.cookiesLastUsed.getTime();
       if (ageMs < 5 * 60 * 1000) {
         log('DEBUG', `validateSession: cookies fresh (${Math.round(ageMs / 1000)}s ago), skip probe`);

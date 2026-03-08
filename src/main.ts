@@ -61,8 +61,8 @@ async function main(): Promise<void> {
       try {
         await client.loginWithCookieString(cookieStr);
         if (client.loggedIn) {
-          // 环境变量 Cookie 刚设进去，做一次轻量校验
-          const valid = await client.validateSession();
+          // 环境变量 Cookie 刚设进去，强制网络校验（不跳过 fresh 优化）
+          const valid = await client.validateSession(true);
           if (!valid) {
             log('WARNING', '环境变量 Cookie 已失效，将清除并尝试其他登录方式');
             client.logout();
