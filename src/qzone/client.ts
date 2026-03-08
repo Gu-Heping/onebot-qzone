@@ -337,7 +337,7 @@ export class QzoneClient {
     // 自动注入 Origin
     const headers = (options.headers ?? {}) as Record<string, string>;
     if (!headers['Origin']) {
-      if (url.includes('user.qzone.qq.com') || url.includes('taotao.qzone.qq.com')) {
+      if (url.includes('user.qzone.qq.com') || url.includes('taotao.qzone.qq.com') || url.includes('sns.qzone.qq.com')) {
         headers['Origin'] = 'https://user.qzone.qq.com';
       } else if (url.includes('up.qzone.qq.com')) {
         headers['Origin'] = 'https://up.qzone.qq.com';
@@ -2053,22 +2053,53 @@ export class QzoneClient {
   async commentEmotion(ouin: string, tid: string, content: string, replyCommentId?: string, replyUin?: string, appid = 311, abstime = 0): Promise<ApiResponse> {
     this.requireLogin();
 
-    // app 分享（appid != 311）优先尝试 cgi_qzshareaddcomment（抓包确认）
-    // topicId = {hostUin}_{abstime}，feedsType=100
-    if (appid !== 311 && abstime) {
+    const shareUrl = `https://sns.qzone.qq.com/cgi-bin/qzshare/cgi_qzshareaddcomment?&g_tk=${this.getGtk()}`;
+
+    // 回复评论：优先 sns cgi_qzshareaddcomment（抓包：paramstr=2, commentId, commentUin）
+    if (replyCommentId && replyUin) {
+      try {
+        const topicId = appid === 311 ? `${ouin}_${tid}` : `${ouin}_${abstime}`;
+        const shareData: Record<string, string> = {
+          topicId,
+          feedsType: '100',
+          inCharset: 'utf-8',
+          outCharset: 'utf-8',
+          plat: 'qzone',
+          source: 'ic',
+          hostUin: ouin,
+          isSignIn: '',
+          platformid: '50',
+          uin: this.qqNumber!,
+          format: 'fs',
+          ref: 'feeds',
+          content,
+          commentId: replyCommentId,
+          commentUin: replyUin,
+          richval: '',
+          richtype: '',
+          private: '0',
+          paramstr: '2',
+          qzreferrer: this.getQzreferrer(),
+        };
+        const shareResp = await this.post(shareUrl, { data: new URLSearchParams(shareData), headers: this.pcHeaders(this.getQzreferrer()) });
+        const shareResult = parseJsonp(shareResp.text) as ApiResponse;
+        if ((shareResult['code'] as number) === 0) return shareResult;
+      } catch { /* fall through to emotion_cgi_re_feeds */ }
+    }
+
+    // app 分享（appid != 311）非回复时优先 sns，topicId = {hostUin}_{abstime}
+    if (appid !== 311 && abstime && !replyCommentId) {
       try {
         const shareData: Record<string, string> = {
           topicId: `${ouin}_${abstime}`, feedsType: '100', inCharset: 'utf-8', outCharset: 'utf-8',
-          plat: 'qzone', source: 'ic', hostUin: ouin, platformid: '50',
+          plat: 'qzone', source: 'ic', hostUin: ouin, isSignIn: '', platformid: '50',
           uin: this.qqNumber!, format: 'fs', ref: 'feeds', content, richval: '', richtype: '', private: '0',
           paramstr: '1', qzreferrer: this.getQzreferrer(),
         };
-        if (replyCommentId && replyUin) { shareData['commentId'] = replyCommentId; shareData['replyUin'] = replyUin; }
-        const shareUrl = `https://sns.qzone.qq.com/cgi-bin/qzshare/cgi_qzshareaddcomment?&g_tk=${this.getGtk()}`;
-        const shareResp = await this.post(shareUrl, { data: new URLSearchParams(shareData) });
-        const shareResult = parseJsonp(shareResp.text, '_Callback') as ApiResponse;
+        const shareResp = await this.post(shareUrl, { data: new URLSearchParams(shareData), headers: this.pcHeaders(this.getQzreferrer()) });
+        const shareResult = parseJsonp(shareResp.text) as ApiResponse;
         if ((shareResult['code'] as number) === 0) return shareResult;
-      } catch { /* fall through to emotion_cgi_re_feeds */ }
+      } catch { /* fall through */ }
     }
 
     // 普通说说 / 回退：emotion_cgi_re_feeds，topicId = {ouin}_{tid}
@@ -2082,7 +2113,7 @@ export class QzoneClient {
     return parseJsonp(resp.text) as ApiResponse;
   }
 
-  async deleteComment(uin: string, tid: string, commentId: string): Promise<ApiResponse> {
+  async deleteComment(uin: string, tid: string, commentId: string, commentUin?: string): Promise<ApiResponse> {
     this.requireLogin();
     if (this.routes['delete_comment'] === 'mobile') {
       const url = `https://mobile.qzone.qq.com/del_comment?g_tk=${this.getGtk()}`;
@@ -2092,6 +2123,35 @@ export class QzoneClient {
       });
       return safeDecodeJsonResponse(resp.data);
     }
+    // 优先 sns 删除评论接口（与空间页删除一致，返回 frameElement.callback({ ret, code, msg })）
+    const topicId = `${uin}_${tid}`;
+    const snsData: Record<string, string> = {
+      inCharset: 'utf-8',
+      outCharset: 'utf-8',
+      plat: 'qzone',
+      source: 'ic',
+      hostUin: uin,
+      uin,
+      topicId,
+      feedsType: '100',
+      commentId,
+      commentUin: commentUin ?? uin,
+      format: 'fs',
+      ref: 'feeds',
+      paramstr: '2',
+      qzreferrer: this.getQzreferrer(),
+    };
+    try {
+      const snsUrl = `https://sns.qzone.qq.com/cgi-bin/qzshare/cgi_qzsharedeletecomment?&g_tk=${this.getGtk()}`;
+      const snsResp = await this.post(snsUrl, {
+        data: new URLSearchParams(snsData),
+        headers: this.pcHeaders(this.getQzreferrer()),
+      });
+      const snsResult = parseJsonp(snsResp.text) as ApiResponse;
+      const ret = (snsResult['ret'] as number | undefined) ?? (snsResult['code'] as number | undefined);
+      if (ret === 0) return { code: 0, message: (snsResult['msg'] as string) ?? 'ok', ...snsResult };
+      // 非 0 视为失败，继续尝试 taotao
+    } catch { /* fall through */ }
     const url = `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_delcomment_ugc?g_tk=${this.getGtk()}`;
     const resp = await this.post(url, {
       data: new URLSearchParams({ hostuin: this.qqNumber!, uin, tid, comment_id: commentId, format: 'json', qzreferrer: this.getQzreferrer() }),

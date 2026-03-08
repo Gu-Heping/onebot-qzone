@@ -32,7 +32,7 @@
 |------|------|-----------|------|
 | 获取评论列表 | ✅ | getcmtreply_v6 多变体 → mobile | |
 | 发表评论 | ✅ | emotion_cgi_re_feeds | 含回复评论 commentId/replyUin |
-| 删除评论 | ✅ | emotion_cgi_delcomment_ugc / mobile del_comment | |
+| 删除评论 | ✅ | cgi_qzsharedeletecomment (sns) → emotion_cgi_delcomment_ugc / mobile del_comment | |
 | **评论点赞** | ❌ 未实现 | 网页端无入口，可能仅移动端支持；若需实现需在移动端抓包 | 见 social-api.md §6 |
 
 ## 三、点赞（说说）

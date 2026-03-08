@@ -234,9 +234,12 @@ export class ActionHandler {
     const tid = String(p['tid'] ?? '');
     const commentId = String(p['comment_id'] ?? '');
     if (!uin || !tid || !commentId) return fail(1400, '缺少 uin / tid / comment_id', echo);
-    const res = await this.client.deleteComment(uin, tid, commentId);
-    return (res as Record<string, unknown>)['code'] === 0
-      ? ok(null, echo) : fail(1500, String((res as Record<string, unknown>)['message'] ?? ''), echo);
+    const commentUin = p['comment_uin'] !== undefined ? String(p['comment_uin']) : undefined;
+    const res = await this.client.deleteComment(uin, tid, commentId, commentUin);
+    const code = (res as Record<string, unknown>)['code'];
+    const ret = (res as Record<string, unknown>)['ret'];
+    const okCode = code === 0 || ret === 0;
+    return okCode ? ok(null, echo) : fail(1500, String((res as Record<string, unknown>)['message'] ?? (res as Record<string, unknown>)['msg'] ?? ''), echo);
   }
 
   // ── forward ───────────────────────────────────
