@@ -232,10 +232,16 @@ export class ActionHandler {
 
   async action_delete_comment(p: Record<string, unknown>, echo?: string): Promise<OneBotResponse> {
     if (!this.client.loggedIn) return fail(1401, '未登录', echo);
-    const uin = String(p['uin'] ?? '');
-    const tid = String(p['tid'] ?? '');
+    const tidRaw = String(p['tid'] ?? '');
     const commentId = String(p['comment_id'] ?? '');
-    if (!uin || !tid || !commentId) return fail(1400, '缺少 uin / tid / comment_id', echo);
+    if (!tidRaw || !commentId) return fail(1400, '缺少 tid / comment_id', echo);
+    const tid = this.client.resolveTidForComments(tidRaw);
+    let uin = String(p['uin'] ?? p['user_id'] ?? '');
+    if (!uin) {
+      const meta = this.client.getPostMeta(tid);
+      if (meta) uin = meta.uin;
+    }
+    if (!uin) return fail(1400, '缺少 uin/user_id 且无法从缓存补全', echo);
     const commentUin = p['comment_uin'] !== undefined ? String(p['comment_uin']) : undefined;
     const res = await this.client.deleteComment(uin, tid, commentId, commentUin);
     const code = (res as Record<string, unknown>)['code'];
@@ -287,10 +293,15 @@ export class ActionHandler {
 
   async action_get_comment_list(p: Record<string, unknown>, echo?: string): Promise<OneBotResponse> {
     if (!this.client.loggedIn) return fail(1401, '未登录', echo);
-    const uin = String(p['user_id'] ?? this.client.qqNumber!);
     const tidRaw = String(p['tid'] ?? '');
     if (!tidRaw) return fail(1400, '缺少 tid', echo);
     const tid = this.client.resolveTidForComments(tidRaw);
+    let uin = p['user_id'] !== undefined && p['user_id'] !== '' ? String(p['user_id']) : '';
+    if (!uin) {
+      const meta = this.client.getPostMeta(tid);
+      if (meta) uin = meta.uin;
+    }
+    if (!uin) uin = this.client.qqNumber!;
     const num = safeInt(p['num'] ?? 20);
     const pos = safeInt(p['pos'] ?? 0);
     const res = await this.client.getCommentsBestEffort(uin, tid, num, pos);
@@ -299,10 +310,15 @@ export class ActionHandler {
 
   async action_get_like_list(p: Record<string, unknown>, echo?: string): Promise<OneBotResponse> {
     if (!this.client.loggedIn) return fail(1401, '未登录', echo);
-    const uin = String(p['user_id'] ?? this.client.qqNumber!);
     const tidRaw = String(p['tid'] ?? '');
     if (!tidRaw) return fail(1400, '缺少 tid', echo);
     const tid = this.client.resolveTidForComments(tidRaw);
+    let uin = p['user_id'] !== undefined && p['user_id'] !== '' ? String(p['user_id']) : '';
+    if (!uin) {
+      const meta = this.client.getPostMeta(tid);
+      if (meta) uin = meta.uin;
+    }
+    if (!uin) uin = this.client.qqNumber!;
     const list = await this.client.getLikeList(uin, tid);
     return ok(list, echo);
   }
