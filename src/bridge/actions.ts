@@ -178,7 +178,11 @@ export class ActionHandler {
     const tid = String(p['tid'] ?? '');
     if (!ouin || !tid) return fail(1400, '缺少 user_id 或 tid', echo);
     const abstime = safeInt(p['abstime'] ?? 0);
-    const res = await this.client.likeEmotion(ouin, tid, abstime);
+    const appid = safeInt(p['appid'] ?? 311) || 311;
+    const typeid = safeInt(p['typeid'] ?? 0);
+    const unikey = p['unikey'] ? String(p['unikey']) : undefined;
+    const curkey = p['curkey'] ? String(p['curkey']) : undefined;
+    const res = await this.client.likeEmotion(ouin, tid, abstime, appid, typeid, unikey, curkey);
     return (res as Record<string, unknown>)['code'] != null && (res as Record<string, unknown>)['code'] !== 0
       ? fail(1500, String((res as Record<string, unknown>)['message'] ?? ''), echo)
       : ok(null, echo);
@@ -190,7 +194,11 @@ export class ActionHandler {
     const tid = String(p['tid'] ?? '');
     if (!ouin || !tid) return fail(1400, '缺少 user_id 或 tid', echo);
     const abstime = safeInt(p['abstime'] ?? 0);
-    const res = await this.client.unlikeEmotion(ouin, tid, abstime);
+    const appid = safeInt(p['appid'] ?? 311) || 311;
+    const typeid = safeInt(p['typeid'] ?? 0);
+    const unikey = p['unikey'] ? String(p['unikey']) : undefined;
+    const curkey = p['curkey'] ? String(p['curkey']) : undefined;
+    const res = await this.client.unlikeEmotion(ouin, tid, abstime, appid, typeid, unikey, curkey);
     return (res as Record<string, unknown>)['code'] === 0 || (res as Record<string, unknown>)['ret'] === 0
       ? ok(null, echo) : fail(1500, String((res as Record<string, unknown>)['message'] ?? ''), echo);
   }
@@ -204,7 +212,9 @@ export class ActionHandler {
     if (!ouin || !tid || !content) return fail(1400, '缺少 target_uin / target_tid / content', echo);
     const replyId = p['reply_comment_id'] ? String(p['reply_comment_id']) : undefined;
     const replyUin = p['reply_uin'] ? String(p['reply_uin']) : undefined;
-    const res = await this.client.commentEmotion(ouin, tid, content, replyId, replyUin);
+    const appid = safeInt(p['appid'] ?? 311) || 311;
+    const abstime = safeInt(p['abstime'] ?? 0);
+    const res = await this.client.commentEmotion(ouin, tid, content, replyId, replyUin, appid, abstime);
     if ((res as Record<string, unknown>)['code'] !== 0)
       return fail(1500, String((res as Record<string, unknown>)['message'] ?? ''), echo);
     // 从返回 HTML 中提取刚发布评论的 comment_id

@@ -1296,7 +1296,7 @@ export class QzoneClient {
   private async getEmotionListViaFeeds3(uin: string, num = 50, pos = 0, maxPages = 15): Promise<ApiResponse> {
     try {
       const isOwn = uin === this.qqNumber;
-      let text: string;
+      let text = '';
       let msglist: Record<string, unknown>[];
       let usedScope = 1;
       /** 是否用 scope=0 + uinlist=目标用户 拉取 */
@@ -1305,16 +1305,16 @@ export class QzoneClient {
       let useFilterFromStream = false;
 
       if (!isOwn) {
-        // 策略 0（指定用户优先）：用 scope=1 综合好友流（~50+ 条），按目标 uin 过滤
-        // scope=1 返回条数远多于 scope=0（5条），能覆盖更多好友的近期帖子
-        log('DEBUG', `feeds3 fallback: for friend uin=${uin}, trying scope=1 stream then filter by uin`);
-        text = await this.fetchFeeds3Html(this.qqNumber!, false, 1, 50);
+        // 策略 0（指定用户优先）：用 scope=0 好友说说流（与 getFriendFeeds 同款请求），按 opuin 过滤
+        // 注意：scope=1 的 JS 数组含「活动记录」（如好友点赞），uin 是活动者而非帖子作者，
+        //       会把 bot 自己的帖子误判为目标好友的帖子。scope=0 feed_data 用 opuin 严格校验，更可靠。
+        log('DEBUG', `feeds3 fallback: for friend uin=${uin}, trying scope=0 stream then filter by opuin`);
+        text = await this.fetchFeeds3Html(this.qqNumber!, false, 0, 20, '', undefined, 'all', 'all');
         const friends = this.extractFriendsFromFeeds3FromText(text);
         if (friends.length) this.mergeFriendCache(friends);
-        // scope=1 的好友帖子在 JS 数组而非 feed_data → skipFeedData=true
-        msglist = this.parseFeeds3Items(text, uin, undefined, pos + num, true);
+        msglist = this.parseFeeds3Items(text, uin, undefined, pos + num, false);
         if (msglist.length > 0) {
-          usedScope = 1;
+          usedScope = 0;
           useFilterFromStream = true;
         }
       } else {
@@ -1373,7 +1373,7 @@ export class QzoneClient {
         
         remainingPages--;
         currentText = useFilterFromStream
-          ? await this.fetchFeeds3Html(this.qqNumber!, true, 1, 50, externparam)
+          ? await this.fetchFeeds3Html(this.qqNumber!, true, 0, 20, externparam, undefined, 'all', 'all')
           : useUinlist
             ? await this.fetchFeeds3Html(this.qqNumber!, true, 0, 50, externparam, uin)
             : await this.fetchFeeds3Html(uin, true, usedScope, 50, externparam);
@@ -1480,10 +1480,12 @@ export class QzoneClient {
         return { code: 0, message: 'ok (end of feed)', msglist: [], next_cursor: '' };
       }
 
-      // 过滤：只保留 appid=311 原创说说（排除点赞 appid=217 等）
+      // 过滤：排除纯活动记录（appid=217 = 好友点赞动态），保留说说/应用分享等
+      // appid=311 原创说说，2100=网易云，2160=QQ音乐，2=相册，3168=B站 等均放行
+      const EXCLUDED_APPIDS = new Set(['217']);
       const all = this.parseFeeds3Items(text, undefined, undefined, want, false);
-      const msglist = all.filter(item => String(item['appid'] ?? item['type'] ?? '311') === '311');
-      log('DEBUG', `getFriendFeeds: scope=0 found ${all.length} total → ${msglist.length} appid=311 posts, hasMore=${hasMore}`);
+      const msglist = all.filter(item => !EXCLUDED_APPIDS.has(String(item['appid'] ?? '')));
+      log('DEBUG', `getFriendFeeds: scope=0 found ${all.length} total → ${msglist.length} posts (excl. activity), hasMore=${hasMore}`);
       return { code: 0, message: 'ok', msglist: msglist.slice(0, want), next_cursor: nextCursor };
     } catch (exc) {
       log('ERROR', `friend feeds 获取失败: ${exc}`);
@@ -1959,16 +1961,32 @@ export class QzoneClient {
     return result;
   }
 
-  async likeEmotion(ouin: string, tid: string, abstime: number, appid = 311, typeid = 0): Promise<ApiResponse> {
-    this.requireLogin();
-    const unikey = `http://user.qzone.qq.com/${ouin}/mood/${tid}`;
+  /** appid=311 用 /mood/ 路径；其他 app 分享传入实际 unikey（从 feeds3 HTML 提取）才准确 */
+  private buildUnikey(ouin: string, tid: string, appid: number): string {
+    return appid === 311
+      ? `http://user.qzone.qq.com/${ouin}/mood/${tid}`
+      : `http://user.qzone.qq.com/${ouin}/app/${tid}`;  // fallback，通常不准
+  }
 
-    // 方法1: internal_dolike_app（参照 astrbot_plugin_qzone）
+  /**
+   * 给帖子点赞。
+   * @param unikeyOverride  从 feeds3 HTML 提取的真实 unikey（app 分享为分享链接 URL）
+   * @param curkeyOverride  从 feeds3 HTML 提取的真实 curkey（`00{ouin}00{abstime}` 格式）
+   */
+  async likeEmotion(
+    ouin: string, tid: string, abstime: number, appid = 311, typeid = 0,
+    unikeyOverride?: string, curkeyOverride?: string,
+  ): Promise<ApiResponse> {
+    this.requireLogin();
+    const unikey = unikeyOverride || this.buildUnikey(ouin, tid, appid);
+    const curkey = curkeyOverride || unikey;
+
+    // 方法1: internal_dolike_app（真实请求抓包验证）
     try {
       const url1 = `https://user.qzone.qq.com/proxy/domain/w.qzone.qq.com/cgi-bin/likes/internal_dolike_app?g_tk=${this.getGtk()}`;
       const resp1 = await this.post(url1, {
         data: new URLSearchParams({
-          qzreferrer: this.getQzreferrer(), opuin: this.qqNumber!, unikey, curkey: unikey,
+          qzreferrer: this.getQzreferrer(), opuin: this.qqNumber!, unikey, curkey,
           appid: String(appid), typeid: String(typeid), fid: tid,
           from: '1', active: '0', fupdate: '1', abstime: String(abstime), format: 'json',
         }),
@@ -1992,14 +2010,18 @@ export class QzoneClient {
     return this.likeMobileFeed(ouin, tid, appid, typeid, 0);
   }
 
-  async unlikeEmotion(ouin: string, tid: string, abstime: number, appid = 311, typeid = 0): Promise<ApiResponse> {
+  async unlikeEmotion(
+    ouin: string, tid: string, abstime: number, appid = 311, typeid = 0,
+    unikeyOverride?: string, curkeyOverride?: string,
+  ): Promise<ApiResponse> {
     this.requireLogin();
-    const unikey = `http://user.qzone.qq.com/${ouin}/mood/${tid}`;
+    const unikey = unikeyOverride || this.buildUnikey(ouin, tid, appid);
+    const curkey = curkeyOverride || unikey;
 
     // 方法1: internal_dolike_app
     const url1 = `https://user.qzone.qq.com/proxy/domain/w.qzone.qq.com/cgi-bin/likes/internal_dolike_app?g_tk=${this.getGtk()}`;
     const resp1 = await this.post(url1, {
-      data: new URLSearchParams({ qzreferrer: this.getQzreferrer(), opuin: this.qqNumber!, unikey, curkey: unikey, appid: String(appid), typeid: String(typeid), fid: tid, from: '1', active: '0', fupdate: '1', format: 'json' }),
+      data: new URLSearchParams({ qzreferrer: this.getQzreferrer(), opuin: this.qqNumber!, unikey, curkey, appid: String(appid), typeid: String(typeid), fid: tid, from: '1', active: '0', fupdate: '1', format: 'json' }),
       headers: this.pcHeaders(this.getQzreferrer()),
     });
     const p1 = safeDecodeJsonResponse(resp1.data);
@@ -2028,10 +2050,31 @@ export class QzoneClient {
     return safeDecodeJsonResponse(resp.data);
   }
 
-  async commentEmotion(ouin: string, tid: string, content: string, replyCommentId?: string, replyUin?: string): Promise<ApiResponse> {
+  async commentEmotion(ouin: string, tid: string, content: string, replyCommentId?: string, replyUin?: string, appid = 311, abstime = 0): Promise<ApiResponse> {
     this.requireLogin();
+
+    // app 分享（appid != 311）优先尝试 cgi_qzshareaddcomment（抓包确认）
+    // topicId = {hostUin}_{abstime}，feedsType=100
+    if (appid !== 311 && abstime) {
+      try {
+        const shareData: Record<string, string> = {
+          topicId: `${ouin}_${abstime}`, feedsType: '100', inCharset: 'utf-8', outCharset: 'utf-8',
+          plat: 'qzone', source: 'ic', hostUin: ouin, platformid: '50',
+          uin: this.qqNumber!, format: 'fs', ref: 'feeds', content, richval: '', richtype: '', private: '0',
+          paramstr: '1', qzreferrer: this.getQzreferrer(),
+        };
+        if (replyCommentId && replyUin) { shareData['commentId'] = replyCommentId; shareData['replyUin'] = replyUin; }
+        const shareUrl = `https://sns.qzone.qq.com/cgi-bin/qzshare/cgi_qzshareaddcomment?&g_tk=${this.getGtk()}`;
+        const shareResp = await this.post(shareUrl, { data: new URLSearchParams(shareData) });
+        const shareResult = parseJsonp(shareResp.text, '_Callback') as ApiResponse;
+        if ((shareResult['code'] as number) === 0) return shareResult;
+      } catch { /* fall through to emotion_cgi_re_feeds */ }
+    }
+
+    // 普通说说 / 回退：emotion_cgi_re_feeds，topicId = {ouin}_{tid}
     const data: Record<string, string> = {
       hostUin: ouin, topicId: `${ouin}_${tid}`, content, format: 'json', qzreferrer: this.getQzreferrer(),
+      appid: String(appid),
     };
     if (replyCommentId && replyUin) { data['commentId'] = replyCommentId; data['replyUin'] = replyUin; }
     const url = `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_re_feeds?g_tk=${this.getGtk()}`;

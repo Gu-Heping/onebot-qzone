@@ -202,6 +202,52 @@ export function parseFeeds3Items(
       }
     }
 
+    // ── 第三方应用分享：提取 appName / appShareTitle / unikey / curkey ──
+    const appid = matchedBlock?.appid ?? '';
+    const typeid = matchedBlock?.typeid ?? '';
+    let appName = '';
+    let appShareTitle = '';
+    let likeUnikey = '';
+    let likeCurkey = '';
+
+    if (appid && appid !== '311') {
+      const searchAll = searchBefore + searchAfter;
+
+      // appName：data-appname 属性 或 class 含 app-name 的元素文本
+      const appNameM = searchAll.match(/data-appname="([^"]+)"/i)
+        ?? searchAll.match(/<[^>]+class="[^"]*(?:app-name|f-app-name)[^"]*"[^>]*>([\s\S]*?)<\/[a-z]+>/i);
+      if (appNameM) appName = appNameM[1]!.replace(/<[^>]+>/g, '').trim();
+
+      // appShareTitle：<p class="ell">、f-ct-title、app-title 等区域
+      const titleM = searchAll.match(/<p[^>]*class="[^"]*ell[^"]*"[^>]*>([\s\S]*?)<\/p>/i)
+        ?? searchAll.match(/<[^>]+class="[^"]*(?:f-ct-title|app-title|app-content-title)[^"]*"[^>]*>([\s\S]*?)<\/[a-z]+>/i);
+      if (titleM) appShareTitle = titleM[1]!.replace(/<[^>]+>/g, '').replace(/&nbsp;/gi, ' ').trim();
+
+      // unikey：data-unikey 属性（点赞按钮上）或直接是分享链接
+      const unM = searchAll.match(/data-unikey="([^"]+)"/i)
+        ?? searchAll.match(/unikey\s*[:=]\s*['"]([^'"]+)['"]/i);
+      if (unM) likeUnikey = unM[1]!;
+
+      // unikey 也可能直接是分享 href（如网易云、B站链接）
+      if (!likeUnikey) {
+        const hrefM = searchAll.match(/href="(https?:\/\/(?:y\.music\.163\.com|music\.163\.com|www\.bilibili\.com|b23\.tv)[^"]+)"/i);
+        if (hrefM) likeUnikey = hrefM[1]!;
+      }
+
+      // curkey：data-curkey 属性 或 JS 数据中的 curkey 字段
+      const ckM = searchAll.match(/data-curkey="([^"]+)"/i)
+        ?? searchAll.match(/curkey\s*[:=]\s*['"]([^'"]+)['"]/i);
+      if (ckM) likeCurkey = ckM[1]!;
+
+      // 如果 curkey 未从 HTML 提取到，按已知公式推算：00{ouin}00{abstime}
+      if (!likeCurkey && dataUin && abstime) {
+        const ts = abstime || (matchedBlock?.timestamp ?? 0);
+        if (ts) {
+          likeCurkey = '00' + dataUin.padStart(10, '0') + '00' + String(ts).padStart(10, '0');
+        }
+      }
+    }
+
     const timestamp = abstime || (matchedBlock?.timestamp ?? 0);
 
     const item: Record<string, unknown> = {
@@ -209,7 +255,12 @@ export function parseFeeds3Items(
       created_time: timestamp, createTime: String(timestamp),
       cmtnum, fwdnum: isForward ? 1 : 0,
       pic: images.map(u => ({ url: u })),
-      appid: matchedBlock?.appid ?? '',
+      appid,
+      typeid,
+      appName,
+      appShareTitle,
+      likeUnikey,
+      likeCurkey,
       _source: 'feeds3',
     };
 

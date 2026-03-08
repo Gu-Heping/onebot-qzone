@@ -9,6 +9,8 @@ import pLimit from 'p-limit';
 import type {
   OneBotEvent, NormalizedItem, QzoneComment, QzoneLike,
 } from '../qzone/types.js';
+import { readFileSync, writeFileSync, mkdirSync } from 'fs';
+import { join } from 'path';
 
 // ─────────────────────────────────────────────────────────
 // helpers
@@ -170,9 +172,31 @@ export function normalizeEmotion(raw: Record<string, unknown>, selfUin: string):
     forwardTid = String(rc['tid'] ?? '');
   }
 
+  const appid = String(raw['appid'] ?? '');
+  const typeid = String(raw['typeid'] ?? '');
+  const appName = String(raw['appName'] ?? '');
+  const appShareTitle = String(raw['appShareTitle'] ?? '');
+  let likeUnikey = String(raw['likeUnikey'] ?? '');
+  let likeCurkey = String(raw['likeCurkey'] ?? '');
+
+  // 预计算 likeUnikey / likeCurkey（若解析阶段未提取到）
+  if (!likeUnikey) {
+    if (typeid === '5' && forwardUin && forwardTid) {
+      // 转发帖：unikey = 原帖 URL，curkey = 转发帖 URL（抓包验证）
+      likeUnikey = `http://user.qzone.qq.com/${forwardUin}/mood/${forwardTid}`;
+      likeCurkey = `http://user.qzone.qq.com/${uin}/mood/${tid}`;
+    } else if (appid === '311' || appid === '') {
+      // 普通说说：unikey = curkey = mood URL
+      likeUnikey = `http://user.qzone.qq.com/${uin}/mood/${tid}`;
+      likeCurkey = likeUnikey;
+    }
+    // app 分享（appid=202 等）的 likeUnikey 由 feeds3Parser 提取，若未提取到则留空
+  }
+
   return {
     tid, uin, nickname, content, createdTime, cmtnum, fwdnum, pics,
     videos: videoUrls, forwardContent, forwardUin, forwardTid, forwardNickname,
+    appid, typeid, appName, appShareTitle, likeUnikey, likeCurkey,
   };
 }
 
@@ -195,9 +219,32 @@ function normalizeLike(raw: Record<string, unknown>): QzoneLike {
 // ─────────────────────────────────────────────────────────
 // OneBotEvent builders
 // ─────────────────────────────────────────────────────────
+/** 已知 appid → 中文名映射（appid 来自 feeds3 HTML）*/
+const APPID_LABELS: Record<string, string> = {
+  '311':  '说说',
+  '2':    '相册',
+  '4':    '转发',
+  '202':  '网易云音乐',
+  '217':  '点赞记录',
+  '2160': 'QQ音乐',
+  '268':  'QQ音乐',
+  '3168': '哔哩哔哩',
+};
+
 function buildPostEvent(item: NormalizedItem, selfId: string): OneBotEvent {
   const segments: Record<string, unknown>[] = [];
+
+  // 第三方应用分享：前缀标签
+  const appLabel = item.appid && item.appid !== '311'
+    ? (APPID_LABELS[item.appid] ?? item.appName ?? `App(${item.appid})`)
+    : '';
+
+  if (appLabel) segments.push({ type: 'text', data: { text: `[${appLabel}] ` } });
   if (item.content) segments.push({ type: 'text', data: { text: item.content } });
+  // 应用分享标题（歌曲名/视频标题等），仅当与 content 不同时附加
+  if (item.appShareTitle && item.appShareTitle !== item.content) {
+    segments.push({ type: 'text', data: { text: item.content ? `\n${item.appShareTitle}` : item.appShareTitle } });
+  }
   // 转发内容作为额外文本段
   if (item.forwardContent) {
     const fwdPrefix = item.forwardNickname ? `[转发自 ${item.forwardNickname}] ` : '[转发] ';
@@ -223,6 +270,7 @@ function buildPostEvent(item: NormalizedItem, selfId: string): OneBotEvent {
     // extra
     _tid: item.tid,
     _uin: item.uin,
+    _abstime: item.createdTime,
     _cmtnum: item.cmtnum,
     _fwdnum: item.fwdnum,
     _pics: item.pics,
@@ -231,6 +279,12 @@ function buildPostEvent(item: NormalizedItem, selfId: string): OneBotEvent {
     _forward_uin: item.forwardUin,
     _forward_tid: item.forwardTid,
     _forward_nickname: item.forwardNickname,
+    _appid: item.appid ?? '',
+    _typeid: item.typeid ?? '',
+    _app_name: item.appName ?? '',
+    _app_share_title: item.appShareTitle ?? '',
+    _like_unikey: item.likeUnikey ?? '',
+    _like_curkey: item.likeCurkey ?? '',
   };
 }
 
@@ -292,6 +346,8 @@ export class EventPoller {
   private lastError = 0;
   private backoff = 0;
   private statusOk = false;
+  private seenTidsDirty = false;
+  private seenTidsSaveTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(
     private readonly client: QzoneClient,
@@ -299,9 +355,45 @@ export class EventPoller {
     private readonly config: BridgeConfig,
   ) {}
 
+  private get seenTidsFile(): string {
+    return join(this.config.cachePath, 'seen_post_tids.json');
+  }
+
+  private loadSeenTids(): void {
+    try {
+      mkdirSync(this.config.cachePath, { recursive: true });
+      const raw = readFileSync(this.seenTidsFile, 'utf-8');
+      const arr = JSON.parse(raw) as string[];
+      for (const t of arr) this.seenPostTids.add(t);
+    } catch { /* 首次运行或文件不存在，忽略 */ }
+  }
+
+  private saveSeenTids(): void {
+    try {
+      // 最多保留最近 2000 条，防止无限增长
+      const arr = [...this.seenPostTids].slice(-2000);
+      writeFileSync(this.seenTidsFile, JSON.stringify(arr), 'utf-8');
+    } catch { /* 忽略写入错误 */ }
+    this.seenTidsDirty = false;
+  }
+
+  private markSeenTid(tid: string): void {
+    this.seenPostTids.add(tid);
+    this.seenTidsDirty = true;
+    // 防抖：5 秒后批量写入
+    if (!this.seenTidsSaveTimer) {
+      this.seenTidsSaveTimer = setTimeout(() => {
+        this.seenTidsSaveTimer = null;
+        if (this.seenTidsDirty) this.saveSeenTids();
+      }, 5000);
+    }
+  }
+
   start(): void {
     if (this.running) return;
     this.running = true;
+    // 加载持久化的已见 tid，防止重启后重复推送
+    this.loadSeenTids();
     // add seeded tids
     for (const tid of this.hub.getSeedTids()) this.trackTids.add(tid);
 
@@ -536,7 +628,7 @@ export class EventPoller {
     for (const item of items) {
       if (!item.tid) continue;
       if (!this.seenPostTids.has(item.tid)) {
-        this.seenPostTids.add(item.tid);
+        this.markSeenTid(item.tid);
         this.trackTids.add(item.tid);
         const event = buildPostEvent(item, selfId);
         await this.hub.publish(event);
@@ -557,7 +649,7 @@ export class EventPoller {
         if (!item.tid || !item.uin) continue;
         const key = `${item.uin}_${item.tid}`;
         if (!this.seenPostTids.has(key)) {
-          this.seenPostTids.add(key);
+          this.markSeenTid(key);
           const event = buildPostEvent(item, selfId);
           (event as Record<string, unknown>)['_from_friend'] = true;
           await this.hub.publish(event);

@@ -54,6 +54,18 @@ export interface NormalizedItem {
   forwardUin?: string;
   forwardTid?: string;
   forwardNickname?: string;
+  /** feeds3 appid：311=说说，2=相册，202=网易云，217=点赞记录（活动流，通常过滤）等 */
+  appid?: string;
+  /** feeds3 typeid：311→0，网易云202→2 等 */
+  typeid?: string;
+  /** 第三方应用名称（从 feeds3 HTML 提取，如「网易云音乐」） */
+  appName?: string;
+  /** 第三方应用分享的内容标题（如歌曲名/视频标题等） */
+  appShareTitle?: string;
+  /** 点赞 API unikey（app 分享为实际分享链接，如网易云歌曲 URL） */
+  likeUnikey?: string;
+  /** 点赞 API curkey（`00{ouin}00{abstime}` 格式） */
+  likeCurkey?: string;
 }
 
 export interface QzoneComment {
