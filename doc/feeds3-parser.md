@@ -25,17 +25,28 @@
 | `flag` | `1` | 标识 |
 | `filter` | `all` | 过滤器 |
 | `applist` | `all` | 应用列表 |
-| `refresh` | `1` | 强制刷新 |
-| `aisession` | 空 | AI 会话 |
-| `icServerTime` | `0` | 服务器时间 |
-| `alive498` | `0` | 存活标识 |
-| `sorttype` | `0` | 排序类型 |
+| `refresh` | 首页 `1`，续页 `0` | 是否刷新 |
+| `pagenum` | 从 externparam 解析 | 页码（与 main.externparam 内一致） |
+| `begintime` | 从 externparam 的 basetime 解析 | 起始时间戳 |
+| `dayspac` | `5` | 往回查天数 |
+| `sidomain` | `qzonestyle.gtimg.cn` | 静态资源域 |
+| `useutf8` | `1` | UTF-8 |
+| `outputhtmlfeed` | `1` | 强制返回 HTML feed |
+| `rd` / `usertime` / `windowId` | 随机/时间戳 | 与浏览器抓包一致 |
+| `aisortEndTime` 等 | `0` | AI 排序相关 |
 | `g_tk` | 计算值 | 安全令牌 |
 | `format` | `json` | 响应格式 |
 
 ## 响应格式
 
-返回 JSON，其中包含 HTML 片段字段，HTML 中的特殊字符经过以下转义：
+接口返回 **JSONP**：`_Callback({ "code": 0, "data": { "main": { ... }, "data": [ ... ] } });`
+
+- **data.main**：分页与游标信息，含 `hasMoreFeeds`、`pagenum`、**externparam**（翻页时下一页的 cursor）、`begintime`、`dayspac` 等。
+- **data.data**：当前页 feed 数组，每项含 `key`、`html`（转义后的 HTML 片段）、`abstime`、`opuin`、`nickname` 等。
+
+翻页时从 **data.main.externparam** 解析 `basetime`、`pagenum` 作为下页的 `begintime` 与顶层 `pagenum`。
+
+HTML 片段中的特殊字符经过以下转义：
 
 | 转义序列 | 实际字符 |
 |---------|---------|

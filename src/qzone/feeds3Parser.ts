@@ -4,7 +4,7 @@
    提取说说列表、好友列表、翻页参数
    ───────────────────────────────────────────── */
 
-import { log, htmlUnescape } from './utils.js';
+import { log, htmlUnescape, parseJsonp } from './utils.js';
 
 // ── feeds3 说说解析 ─────────────────────────────
 
@@ -625,15 +625,16 @@ export function extractFriendsFromFeeds3FromText(
 
 // ── 翻页参数提取 ─────────────────────────────────
 
-/** 从 feeds3 响应中提取 externparam 翻页参数（支持 JSON 包装或内联） */
+/** 从 feeds3 响应中提取 externparam 翻页参数（支持 _Callback JSONP、data.main 或内联） */
 export function extractExternparam(text: string): string {
   try {
-    const o = JSON.parse(text) as Record<string, unknown>;
+    const o = (text.trim().startsWith('{') ? JSON.parse(text) : parseJsonp(text)) as Record<string, unknown>;
     const data = o?.data as Record<string, unknown> | undefined;
-    const v = (data?.externparam ?? o?.externparam) as string | undefined;
+    const main = data?.main as Record<string, unknown> | undefined;
+    const v = (main?.externparam ?? data?.externparam ?? o?.externparam) as string | undefined;
     if (typeof v === 'string' && v.length > 0) return v;
   } catch {
-    // 非 JSON 或解析失败，用正则
+    // 非 JSON/JSONP 或解析失败，用正则
   }
   const m = text.match(/externparam:'([^']+)'/);
   if (m) return m[1]!;

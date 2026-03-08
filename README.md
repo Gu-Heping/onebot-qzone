@@ -284,6 +284,14 @@ npm run verify:readonly  # 端点健康检查（仅读接口）
 - **API 测试**：需先启动 bridge 并登录，`--readonly` 模式仅验证读接口。
 - **端点健康检查**：`scripts/verify-endpoints.ts`，启动即检验 8 个读 + 2 个写端点，输出彩色 PASS/FAIL/SKIP 报告。
 
+### 调试获取评论
+
+获取评论走 `getCommentsBestEffort`：先 PC POST（t1_source=1）→ PC GET 多变体 → 失败后 mobile。调试时可：
+
+1. **看日志**：控制台会打 `getCommentsBestEffort: 成功 (t1_source=1) 评论数≈N` 或 `使用 mobile 评论数≈N`；若 PC 全部失败会打 `getComments: PC 全部失败，回退 mobile`。PC 与 mobile 都失败时，若有 feeds3 兜底会打 `getCommentsBestEffort: 使用 feeds3 兜底 评论数=M/T`。
+2. ** dump 原始响应**：设置 `QZONE_DEBUG_DUMP=1`，每次评论请求会把响应写入 `{QZONE_CACHE_PATH}/debug/`，文件名如 `comments_pc_post_*.txt`、`comments_pc_0_*.txt`、`comments_mobile_*.txt`，便于对比接口返回的 code/commentlist。
+3. **直接调接口**：先启动 bridge，再 `POST http://127.0.0.1:8080/get_comment_list`，body `{"tid":"你的说说tid","user_id":"可选，默认当前登录","num":20,"pos":0}`，查看返回的 `data` 及日志中的 code/评论数。
+
 ---
 
 ## 项目结构

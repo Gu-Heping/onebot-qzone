@@ -1182,6 +1182,7 @@ export class QzoneClient {
       outputhtmlfeed: '1',                 // 强制 HTML feed 格式，确保 feed_data 元素存在
       rd: String(Math.random()),
       usertime: String(Date.now()),
+      windowId: String(Math.random()),     // 与浏览器抓包一致
       g_tk: String(this.getGtk()),
       format: 'json',
     });
@@ -1681,6 +1682,17 @@ export class QzoneClient {
   // ──────────────────────────────────────────────
   // Comments
   // ──────────────────────────────────────────────
+  /** 从评论 API 响应中取评论条数（用于调试日志） */
+  private commentCount(p: ApiResponse): number {
+    if (!p || p['_empty']) return -1;
+    for (const key of ['commentlist', 'comment_list', 'comments', 'data']) {
+      const v = p[key];
+      if (Array.isArray(v)) return v.length;
+      if (v && typeof v === 'object' && Array.isArray((v as Record<string, unknown>)['list'])) return ((v as Record<string, unknown>)['list'] as unknown[]).length;
+    }
+    return -1;
+  }
+
   async getComments(
     uin: string, tid: string, num = 20, pos = 0,
     t1Source?: number, t1Uin?: string, t1Tid?: string,
@@ -1690,13 +1702,17 @@ export class QzoneClient {
     const mobileUrl = `https://mobile.qzone.qq.com/get_comment_list?g_tk=${this.getGtk()}&uin=${uin}&cellid=${tid}&num=${num}&pos=${pos}&format=json`;
 
     if (this.routes['comments'] === 'mobile') {
+      log('DEBUG', `getComments: 使用 mobile 路径 (routes.comments=mobile)`);
       const resp = await this.get(mobileUrl, { headers: this.mobileHeaders() });
       this.dumpDebugPayload('comments_mobile', resp.text);
-      return safeDecodeJsonResponse(resp.data);
+      const out = safeDecodeJsonResponse(resp.data);
+      log('DEBUG', `getComments(mobile): code=${(out as ApiResponse)['code']} comments≈${this.commentCount(out as ApiResponse)}`);
+      return out;
     }
 
     const now = Date.now() / 1000;
     if (this.commentsAllFailTime > 0 && now - this.commentsAllFailTime < this.commentsAllFailTtl) {
+      log('DEBUG', `getComments: 在 commentsAllFail 冷却期内，直接走 mobile`);
       const resp = await this.get(mobileUrl, { headers: this.mobileHeaders() });
       this.dumpDebugPayload('comments_mobile', resp.text);
       return safeDecodeJsonResponse(resp.data);
@@ -1712,6 +1728,7 @@ export class QzoneClient {
     if (t1Uin) postData['t1_uin'] = t1Uin;
     if (t1Tid) postData['t1_tid'] = t1Tid;
     try {
+      log('DEBUG', `getComments: 尝试 PC POST (t1_source=${t1Source ?? 'none'})`);
       const resp = await this.post(postUrl, {
         data: new URLSearchParams(postData),
         headers: this.pcHeaders(this.getQzreferrer()),
@@ -1720,7 +1737,9 @@ export class QzoneClient {
       const raw = resp.text.trim();
       if (raw) {
         const payload = parseJsonp(raw) as ApiResponse;
-        if (payload && (payload['code'] === undefined || payload['code'] === 0)) {
+        const code = payload?.['code'] as number | undefined;
+        log('DEBUG', `getComments(PC POST): code=${code} comments≈${payload ? this.commentCount(payload) : 0}`);
+        if (payload && (code === undefined || code === 0)) {
           this.commentsWinningVariant = -1;
           validateApiResponse('comment_list', payload, raw);
           return payload;
@@ -1763,10 +1782,12 @@ export class QzoneClient {
         const resp = await this.get(url, { headers: this.pcHeaders(this.getQzreferrer()) });
         this.dumpDebugPayload(`comments_pc_${index}`, resp.text);
         const raw = resp.text.trim();
-        if (!raw) continue;
+        if (!raw) { log('DEBUG', `getComments(PC GET #${index}): 空响应`); continue; }
         const payload = parseJsonp(raw) as ApiResponse;
         lastPayload = payload ?? { raw: raw.slice(0, 200) };
-        if (payload && (payload['code'] === undefined || payload['code'] === 0)) {
+        const code = payload?.['code'] as number | undefined;
+        log('DEBUG', `getComments(PC GET #${index}): code=${code} comments≈${payload ? this.commentCount(payload) : 0}`);
+        if (payload && (code === undefined || code === 0)) {
           this.commentsWinningVariant = index;
           validateApiResponse('comment_list', payload, raw);
           return payload;
@@ -1775,29 +1796,54 @@ export class QzoneClient {
     }
 
     this.commentsAllFailTime = Date.now() / 1000;
-    log('DEBUG', `PC 评论 API 全部失败，尝试 mobile`);
+    log('INFO', `getComments: PC 全部失败，回退 mobile (uin=${uin} tid=${tid})`);
     try {
       const resp = await this.get(mobileUrl, { headers: this.mobileHeaders() });
+      this.dumpDebugPayload('comments_mobile_fallback', resp.text);
       const p = safeDecodeJsonResponse(resp.data);
+      log('DEBUG', `getComments(mobile fallback): valid=${this.isValidApiResponse(p)} comments≈${this.commentCount(p)}`);
       if (this.isValidApiResponse(p)) return p;
     } catch { /* ignore */ }
     return lastPayload;
   }
 
   async getCommentsBestEffort(uin: string, tid: string, num = 20, pos = 0): Promise<ApiResponse> {
+    log('DEBUG', `getCommentsBestEffort: uin=${uin} tid=${tid} num=${num} pos=${pos}`);
     try {
       const p = await this.getComments(uin, tid, num, pos, 1, uin, tid);
-      if (p && !p['_empty'] && (p['code'] === undefined || p['code'] === 0)) return p;
-    } catch { /* ignore */ }
+      if (p && !p['_empty'] && (p['code'] === undefined || p['code'] === 0)) {
+        log('INFO', `getCommentsBestEffort: 成功 (t1_source=1) 评论数≈${this.commentCount(p)}`);
+        return p;
+      }
+    } catch (e) { log('DEBUG', `getCommentsBestEffort t1_source=1 异常: ${e}`); }
     try {
       const p = await this.getComments(uin, tid, num, pos, 0);
-      if (p && !p['_empty'] && (p['code'] === undefined || p['code'] === 0)) return p;
-    } catch { /* ignore */ }
+      if (p && !p['_empty'] && (p['code'] === undefined || p['code'] === 0)) {
+        log('INFO', `getCommentsBestEffort: 成功 (t1_source=0) 评论数≈${this.commentCount(p)}`);
+        return p;
+      }
+    } catch (e) { log('DEBUG', `getCommentsBestEffort t1_source=0 异常: ${e}`); }
     try {
-      return await this.getCommentsMobile(uin, tid, num, pos);
-    } catch {
-      return { code: -1, message: 'all comment methods failed' };
+      const p = await this.getCommentsMobile(uin, tid, num, pos);
+      log('INFO', `getCommentsBestEffort: 使用 mobile 评论数≈${this.commentCount(p)}`);
+      return p;
+    } catch (e) { log('DEBUG', `getCommentsBestEffort mobile 异常: ${e}`); }
+
+    // 兜底：使用 feeds3 拉取说说时已解析出的评论（仅覆盖最近通过 getEmotionList/getFriendFeeds 拉过的说说）
+    const feeds3List = this.feeds3Comments.get(tid);
+    if (feeds3List && feeds3List.length > 0) {
+      const slice = feeds3List.slice(pos, pos + num);
+      log('INFO', `getCommentsBestEffort: 使用 feeds3 兜底 评论数=${slice.length}/${feeds3List.length}`);
+      return {
+        code: 0,
+        commentlist: slice,
+        _source: 'feeds3',
+        _feeds3_total: feeds3List.length,
+      };
     }
+
+    log('WARNING', `getCommentsBestEffort: 全部失败 (含无 feeds3 兜底)`);
+    return { code: -1, message: 'all comment methods failed' };
   }
 
   /**
