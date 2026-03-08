@@ -250,6 +250,9 @@ export function parseFeeds3Items(
 
     const timestamp = abstime || (matchedBlock?.timestamp ?? 0);
 
+    // 当前用户是否已点赞：点赞按钮在 feed 底部，用 searchAfter 检测 data-islike="1" 或 class 含 item-on
+    const isLiked = /data-islike="1"/.test(searchAfter) || /qz_like_btn[^"]*item-on|item-on[^"]*qz_like_btn/.test(searchAfter);
+
     const item: Record<string, unknown> = {
       tid, uin: dataUin, nickname, content,
       created_time: timestamp, createTime: String(timestamp),
@@ -261,6 +264,7 @@ export function parseFeeds3Items(
       appShareTitle,
       likeUnikey,
       likeCurkey,
+      isLiked,
       _source: 'feeds3',
     };
 

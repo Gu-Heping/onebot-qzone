@@ -36,6 +36,7 @@ QQ空间 → OneBot v11 协议桥接服务（TypeScript 原生实现）。
 - 点赞检测双重策略：feeds3 HTML 内嵌点赞者详情（QQ / 昵称 / 时间 / 个性赞图标）+ `qz_opcnt2` 计数兜底
   - feeds3 HTML 解析出点赞者 QQ、昵称、时间、图标，事件推送可带详情
   - feeds3 只覆盖最近点赞，剩余用计数事件补充
+- **是否已点赞**：通过 feeds3 获取的说说列表里，每条带 **`isLiked`**（boolean），表示当前登录用户是否已点过赞；也可调用 `get_like_list` 拿到点赞者列表，判断当前用户是否在列表中
 - 点赞使用 `internal_dolike_app` → `like_cgi_likev6` → Mobile 三级 fallback
 - 图片 URL 提取优先级：`url2` → `url3` → `url1` → `smallurl`（高清优先）
 - feeds3 LRU 缓存采用 O(1) Map 插入序逐出
@@ -291,6 +292,20 @@ npm run verify:readonly  # 端点健康检查（仅读接口）
 1. **看日志**：控制台会打 `getCommentsBestEffort: 成功 (t1_source=1) 评论数≈N` 或 `使用 mobile 评论数≈N`；若 PC 全部失败会打 `getComments: PC 全部失败，回退 mobile`。PC 与 mobile 都失败时，若有 feeds3 兜底会打 `getCommentsBestEffort: 使用 feeds3 兜底 评论数=M/T`。
 2. ** dump 原始响应**：设置 `QZONE_DEBUG_DUMP=1`，每次评论请求会把响应写入 `{QZONE_CACHE_PATH}/debug/`，文件名如 `comments_pc_post_*.txt`、`comments_pc_0_*.txt`、`comments_mobile_*.txt`，便于对比接口返回的 code/commentlist。
 3. **直接调接口**：先启动 bridge，再 `POST http://127.0.0.1:8080/get_comment_list`，body `{"tid":"你的说说tid","user_id":"可选，默认当前登录","num":20,"pos":0}`，查看返回的 `data` 及日志中的 code/评论数。
+
+**获取评论返回空 /「暂无评论」— 可能原因（先定位再修）**
+
+1. **user_id 传错**  
+   `user_id` 必须是**该条说说的作者**（发动态的人），不是当前登录的 bot。例如 A 发的动态，拉评论时必须传 A 的 QQ 号；若默认成 bot 的 QQ，PC/mobile 都会查错人，容易返回空或错误。
+
+2. **tid 格式不一致**  
+   - 评论接口里：PC `emotion_cgi_getcmtreply_v6` 的 `tid`、mobile `get_comment_list` 的 `cellid`，在空间页/feeds3 里通常对应说说的 **key**（一串 hex，如 `3ea22c2e8e25ac69aa7f0500`）。  
+   - 有的来源（如部分推送、计数接口）会给出 **abstime**（十进制时间戳，如 `1772905792`）。  
+   - 若用 abstime 当 tid 去拉评论，而接口期望 key，可能返回空或 code=-3。  
+   **建议**：从 `get_emotion_list` 或推送事件里取**同一条说说**的 `tid`（即 key）和作者 `uin`，用这一对去调 `get_comment_list`；若当前只有 abstime，需先确认该说说在列表/详情里的 key 再试。
+
+3. **PC/mobile 接口本身不可用**  
+   若你环境里 PC 评论接口一直 -3、mobile 404，会走 feeds3 兜底；但只有「最近通过 feeds3 拉过的那批说说」才有缓存评论，其它会说仍会显示暂无评论。
 
 ---
 
