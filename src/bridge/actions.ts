@@ -125,6 +125,42 @@ export class ActionHandler {
     }, echo);
   }
 
+  /** 检查当前 Cookie 是否过期：执行网络探针校验，返回是否有效及 Cookie 年龄等信息 */
+  async action_check_cookie(p: Record<string, unknown>, echo?: string): Promise<OneBotResponse> {
+    if (!this.client.loggedIn) {
+      return ok({
+        valid: false,
+        expired: true,
+        message: '未登录，无 Cookie',
+        cookie_age_seconds: null,
+        has_p_skey: false,
+        has_skey: false,
+      }, echo);
+    }
+    const now = Date.now();
+    const cookieAgeSeconds = this.client.cookiesLastUsed
+      ? Math.round((now - this.client.cookiesLastUsed.getTime()) / 1000)
+      : null;
+    const hasPskey = !!this.client.cookies['p_skey'];
+    const hasSkey = !!this.client.cookies['skey'];
+    const probe = (p['probe'] !== false && p['probe'] !== '0'); // 默认 true：发起网络探针
+    let valid = false;
+    if (probe) {
+      valid = await this.client.validateSession();
+    } else {
+      valid = hasPskey && hasSkey;
+    }
+    return ok({
+      valid,
+      expired: !valid,
+      message: valid ? 'Cookie 有效' : (probe ? 'Cookie 已过期或探针失败，建议重新登录' : '未探针，仅根据 p_skey/skey 存在判断'),
+      cookie_age_seconds: cookieAgeSeconds,
+      has_p_skey: hasPskey,
+      has_skey: hasSkey,
+      qq: this.client.qqNumber ?? null,
+    }, echo);
+  }
+
   async action_get_version_info(_p: Record<string, unknown>, echo?: string): Promise<OneBotResponse> {
     return ok({ app_name: 'qzone-bridge', app_version: '2.0.0', protocol_version: 'v11' }, echo);
   }
@@ -489,6 +525,24 @@ export class ActionHandler {
       } catch { /* ignore */ }
     }
     return ok({ user_id: safeInt(this.client.qqNumber!), nickname: nickname || 'QZone用户' }, echo);
+  }
+
+  /** 更新 Cookie：传入与 login_cookie 相同格式的 cookie 字符串，覆盖当前会话并写回缓存/.env */
+  async action_update_cookie(p: Record<string, unknown>, echo?: string): Promise<OneBotResponse> {
+    const cookieStr = String(p['cookie'] ?? p['cookie_string'] ?? '').trim();
+    if (!cookieStr) return fail(1400, '缺少 cookie（请传入 cookie 或 cookie_string）', echo);
+    try {
+      await this.client.loginWithCookieString(cookieStr);
+      this.client.syncCookieToEnvFile();
+      const nickname = this.client.getNicknameFromCookie() || 'QZone用户';
+      return ok({
+        message: 'Cookie 已更新',
+        user_id: safeInt(this.client.qqNumber!),
+        nickname,
+      }, echo);
+    } catch (e) {
+      return fail(1500, e instanceof Error ? e.message : String(e), echo);
+    }
   }
 
   async action_logout(_p: Record<string, unknown>, echo?: string): Promise<OneBotResponse> {

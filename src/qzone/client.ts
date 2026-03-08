@@ -1448,18 +1448,21 @@ export class QzoneClient {
       // ── 解析并缓存 feeds3 内嵌评论 ──
       this.feeds3Comments.clear();
       for (const htmlText of allHtmlTexts) {
-        const comments = _parseFeeds3Comments(htmlText);
-        for (const [tid, cmts] of comments) {
-          const existing = this.feeds3Comments.get(tid);
-          if (existing) {
-            // 去重合并（按 commentid）
-            const seenIds = new Set(existing.map(c => String(c['commentid'])));
-            for (const c of cmts) {
-              if (!seenIds.has(String(c['commentid']))) existing.push(c);
+        try {
+          const comments = _parseFeeds3Comments(htmlText);
+          for (const [tid, cmts] of comments) {
+            const existing = this.feeds3Comments.get(tid);
+            if (existing) {
+              const seenIds = new Set(existing.map(c => String(c['commentid'])));
+              for (const c of cmts) {
+                if (!seenIds.has(String(c['commentid']))) existing.push(c);
+              }
+            } else {
+              this.feeds3Comments.set(tid, cmts);
             }
-          } else {
-            this.feeds3Comments.set(tid, cmts);
           }
+        } catch (e) {
+          log('WARN', `parseFeeds3Comments failed: ${e}`);
         }
       }
 

@@ -413,16 +413,21 @@ export interface Feeds3Comment {
 }
 
 /**
- * 从 text 的 start 位置起，找到与当前 <li> 平衡的 </li> 的结束位置（含 </li> 这 6 个字符）。
+ * 从 text 的 start 位置起，找到与当前「comments-item」<li> 平衡的 </li> 的结束位置（含 </li>）。
+ * 只统计同类的 <li class="comments-item">，避免把 feed 的 <li class="f-single"> 算进去导致越界。
  */
-function findMatchingClosingLi(text: string, start: number): number {
+function findMatchingClosingCommentsItemLi(text: string, start: number): number {
+  const liCommentsOpen = /<li\s+class="comments-item/g;
+  const liClose = /<\/li>/g;
   let depth = 1;
   let pos = start;
   while (depth > 0 && pos < text.length) {
     const nextClose = text.indexOf('</li>', pos);
     if (nextClose < 0) return -1;
-    const nextOpen = text.indexOf('<li ', pos);
-    if (nextOpen >= 0 && nextOpen < nextClose) {
+    liCommentsOpen.lastIndex = pos;
+    const openMatch = liCommentsOpen.exec(text);
+    const nextOpen = openMatch !== null && openMatch.index < nextClose ? openMatch.index : -1;
+    if (nextOpen >= 0) {
       depth++;
       pos = nextOpen + 1;
     } else {
@@ -466,7 +471,7 @@ export function parseFeeds3Comments(
   while ((m = itemStartPat.exec(text)) !== null) {
     const attrs = m[1]!;
     const openEnd = m.index + m[0].length;
-    const closeEnd = findMatchingClosingLi(text, openEnd);
+    const closeEnd = findMatchingClosingCommentsItemLi(text, openEnd);
     if (closeEnd < 0) continue;
     const body = text.slice(openEnd, closeEnd - 6);
 
