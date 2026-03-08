@@ -207,10 +207,11 @@ export class ActionHandler {
   // ── comment ───────────────────────────────────
   async action_send_comment(p: Record<string, unknown>, echo?: string): Promise<OneBotResponse> {
     if (!this.client.loggedIn) return fail(1401, '未登录', echo);
-    const tid = String(p['target_tid'] ?? p['tid'] ?? '');
+    const tidRaw = String(p['target_tid'] ?? p['tid'] ?? '');
     const content = String(p['content'] ?? '');
-    if (!tid || !content) return fail(1400, '缺少 tid / content', echo);
-    // user_id 可选——缺失时由 client 从缓存补全
+    if (!tidRaw || !content) return fail(1400, '缺少 tid / content', echo);
+    const tid = this.client.resolveTidForComments(tidRaw);
+    // user_id 可选——缺失时由 client 从缓存补全（缓存 key 为 hex 时 getPostMeta(tid) 才命中）
     const ouin = String(p['target_uin'] ?? p['user_id'] ?? '');
     const replyId = p['reply_comment_id'] ? String(p['reply_comment_id']) : undefined;
     const replyUin = p['reply_uin'] ? String(p['reply_uin']) : undefined;

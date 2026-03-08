@@ -250,11 +250,23 @@ export function parseFeeds3Items(
 
     const timestamp = abstime || (matchedBlock?.timestamp ?? 0);
 
+    // 评论/拉评论接口需要 hex key；当 data-tid 为纯数字（abstime）时，从同块内找 data-key 作为 tid
+    let canonicalTid = tid;
+    if (/^\d+$/.test(tid)) {
+      const combined = `${searchBefore} ${attrs} ${searchAfter.slice(0, 2000)}`;
+      const keyMatch = combined.match(/data-key="([a-f0-9]{12,})"/i);
+      if (keyMatch) {
+        canonicalTid = keyMatch[1]!;
+        seenTids.add(canonicalTid);
+        log('DEBUG', `parseFeeds3Items: tid ${tid} (abstime) -> key ${canonicalTid}`);
+      }
+    }
+
     // 当前用户是否已点赞：点赞按钮在 feed 底部，用 searchAfter 检测 data-islike="1" 或 class 含 item-on
     const isLiked = /data-islike="1"/.test(searchAfter) || /qz_like_btn[^"]*item-on|item-on[^"]*qz_like_btn/.test(searchAfter);
 
     const item: Record<string, unknown> = {
-      tid, uin: dataUin, nickname, content,
+      tid: canonicalTid, uin: dataUin, nickname, content,
       created_time: timestamp, createTime: String(timestamp),
       cmtnum, fwdnum: isForward ? 1 : 0,
       pic: images.map(u => ({ url: u })),
