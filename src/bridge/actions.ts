@@ -7,6 +7,7 @@ import type { EventHub } from './hub.js';
 import type { EventPoller } from './poller.js';
 import { safeInt } from './utils.js';
 import type { OneBotResponse } from '../qzone/types.js';
+import { log } from '../qzone/utils.js';
 
 // ──────────────────────────────────────────────
 // SSRF guard
@@ -305,7 +306,10 @@ export class ActionHandler {
     if (!uin) uin = this.client.qqNumber!;
     const num = safeInt(p['num'] ?? 20);
     const pos = safeInt(p['pos'] ?? 0);
+    log('INFO', `get_comment_list: tidRaw=${tidRaw} -> tid=${tid} uin=${uin}`);
     const res = await this.client.getCommentsBestEffort(uin, tid, num, pos);
+    const cnt = [res['commentlist'], res['comment_list'], res['comments'], res['data']].find(Array.isArray) as unknown[] | undefined;
+    log('INFO', `get_comment_list: code=${(res as Record<string, unknown>)['code']} comments=${cnt?.length ?? 0}`);
     return ok(res, echo);
   }
 

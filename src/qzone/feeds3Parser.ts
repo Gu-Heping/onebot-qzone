@@ -250,15 +250,23 @@ export function parseFeeds3Items(
 
     const timestamp = abstime || (matchedBlock?.timestamp ?? 0);
 
-    // 评论/拉评论接口需要 hex key；当 data-tid 为纯数字（abstime）时，从同块内找 data-key 作为 tid
+    // 评论/拉评论接口需要 key（hex 或短 key）；当 data-tid 为纯数字（abstime）时优先用 data-fkey，否则块内 data-key/key:
     let canonicalTid = tid;
     if (/^\d+$/.test(tid)) {
-      const combined = `${searchBefore} ${attrs} ${searchAfter.slice(0, 2000)}`;
-      const keyMatch = combined.match(/data-key="([a-f0-9]{12,})"/i);
-      if (keyMatch) {
-        canonicalTid = keyMatch[1]!;
+      const fkey = dataAttr(attrs, 'fkey');
+      if (fkey) {
+        canonicalTid = fkey;
         seenTids.add(canonicalTid);
-        log('DEBUG', `parseFeeds3Items: tid ${tid} (abstime) -> key ${canonicalTid}`);
+        log('DEBUG', `parseFeeds3Items: tid ${tid} (abstime) -> fkey ${canonicalTid}`);
+      } else {
+        const combined = `${searchBefore} ${attrs} ${searchAfter.slice(0, 4000)}`;
+        let keyMatch = combined.match(/data-key="([a-z0-9]{6,})"/i);
+        if (!keyMatch) keyMatch = combined.match(/key:\s*['"]([a-z0-9]{6,})['"]/i);
+        if (keyMatch) {
+          canonicalTid = keyMatch[1]!;
+          seenTids.add(canonicalTid);
+          log('DEBUG', `parseFeeds3Items: tid ${tid} (abstime) -> key ${canonicalTid}`);
+        }
       }
     }
 
@@ -405,15 +413,36 @@ export interface Feeds3Comment {
 }
 
 /**
- * 从 feeds3 HTML 中提取评论详情。
+ * 从 text 的 start 位置起，找到与当前 <li> 平衡的 </li> 的结束位置（含 </li> 这 6 个字符）。
+ */
+function findMatchingClosingLi(text: string, start: number): number {
+  let depth = 1;
+  let pos = start;
+  while (depth > 0 && pos < text.length) {
+    const nextClose = text.indexOf('</li>', pos);
+    if (nextClose < 0) return -1;
+    const nextOpen = text.indexOf('<li ', pos);
+    if (nextOpen >= 0 && nextOpen < nextClose) {
+      depth++;
+      pos = nextOpen + 1;
+    } else {
+      depth--;
+      if (depth === 0) return nextClose + 6;
+      pos = nextClose + 1;
+    }
+  }
+  return -1;
+}
+
+/**
+ * 从 feeds3 HTML 中提取评论详情（含多级评论：commentroot + replyroot）。
  *
- * feeds3 的评论嵌在 `<li class="comments-item">` 内，包含：
- * - `data-tid`  = 评论 ID（数字）
+ * feeds3 的评论嵌在 `<li class="comments-item">` 内，含 data-type="commentroot"（一级）或 "replyroot"（回复）。
+ * - `data-tid`  = 评论 ID
  * - `data-uin`  = 评论者 QQ
  * - `data-nick` = 评论者昵称
- * - 正文在 `<div class="comments-content">` 内
- * - 时间在 `<span class="state">` 内
- * - 所属说说 TID 在 `data-param` 的 `t1_tid=` 参数中
+ * - 一级正文格式：nickname : TEXT；回复格式：nickname 回复 target : TEXT
+ * - 所属说说 TID 在同条块 `data-param` 的 `t1_tid=` 中；回复的被回复人/评论在 `t2_uin`/`t2_tid` 中
  *
  * 返回 Map<postTid, commentRecords[]>，可直接传给 normalizeComment()。
  * @param text  feeds3_html_more 原始文本（已 unescape）
@@ -423,37 +452,60 @@ export function parseFeeds3Comments(
 ): Map<string, Record<string, unknown>[]> {
   const result = new Map<string, Record<string, unknown>[]>();
 
-  // 匹配每个 <li class="comments-item ..."> ... </li>
-  const itemPat = /<li\s+class="comments-item[^"]*"([^>]*)>([\s\S]*?)<\/li>/g;
+  // 先收集全文所有 t1_tid 出现位置
+  const tidRefs: { index: number; postTid: string }[] = [];
+  const tidPat = /t1_tid=([a-z0-9]+)/gi;
+  let tidM: RegExpExecArray | null;
+  while ((tidM = tidPat.exec(text)) !== null) {
+    tidRefs.push({ index: tidM.index, postTid: tidM[1]! });
+  }
+
+  const itemStartPat = /<li\s+class="comments-item[^"]*"([^>]*)>/g;
   let m: RegExpExecArray | null;
 
-  while ((m = itemPat.exec(text)) !== null) {
+  while ((m = itemStartPat.exec(text)) !== null) {
     const attrs = m[1]!;
-    const body = m[2]!;
+    const openEnd = m.index + m[0].length;
+    const closeEnd = findMatchingClosingLi(text, openEnd);
+    if (closeEnd < 0) continue;
+    const body = text.slice(openEnd, closeEnd - 6);
 
-    // data 属性提取
     const commentId = attrs.match(/data-tid="([^"]*)"/) ?.[1] ?? '';
     const uin       = attrs.match(/data-uin="([^"]*)"/) ?.[1] ?? '';
     const nick      = attrs.match(/data-nick="([^"]*)"/) ?.[1] ?? '';
+    const dataType  = attrs.match(/data-type="([^"]*)"/) ?.[1] ?? '';
     if (!commentId) continue;
 
-    // 找所属说说 TID：data-param 里的 t1_tid
-    const postTidMatch = body.match(/t1_tid=([a-f0-9]+)/);
-    const postTid = postTidMatch?.[1] ?? '';
+    let postTid = body.match(/t1_tid=([a-z0-9]+)/i)?.[1] ?? '';
+    if (!postTid && tidRefs.length) {
+      const commentEnd = closeEnd;
+      const next = tidRefs.find((r) => r.index >= commentEnd);
+      if (next) postTid = next.postTid;
+      else postTid = tidRefs[tidRefs.length - 1]!.postTid;
+    }
     if (!postTid) continue;
 
-    // 正文：nickname : TEXT<div ...
+    const t2Uin = body.match(/t2_uin=(\d+)/i)?.[1] ?? '';
+    const t2Tid = body.match(/t2_tid=([^&"\s]+)/i)?.[1] ?? '';
+
     let content = '';
-    const contentMatch = body.match(
-      /<a\s+class="nickname[^"]*"[^>]*>[^<]*<\/a>(?:&nbsp;)?\s*:\s*([\s\S]*?)(?:<div\s+class="comments-op|$)/,
-    );
-    if (contentMatch) {
-      content = htmlUnescape(
-        contentMatch[1]!.replace(/<[^>]+>/g, ''),
-      ).trim();
+    if (dataType === 'replyroot' && body.includes('回复')) {
+      const replyMatch = body.match(/回复[\s\S]*?<\/a>\s*:\s*([\s\S]*?)(?:<div\s+class="comments-op|$)/);
+      if (replyMatch) {
+        content = htmlUnescape(replyMatch[1]!.replace(/<[^>]+>/g, '')).trim();
+      }
+    }
+    if (!content) {
+      const contentMatch = body.match(
+        /<a\s+class="nickname[^"]*"[^>]*>[^<]*<\/a>(?:&nbsp;)?\s*:\s*([\s\S]*?)(?:<div\s+class="comments-op|$)/,
+      );
+      if (contentMatch) {
+        content = htmlUnescape(
+          contentMatch[1]!.replace(/<[^>]+>/g, ''),
+        ).trim();
+      }
     }
 
-    // 时间：span.state — 可能是 "HH:MM"、"昨天 HH:MM" 或 "YYYY年M月D日"
     let createdTime = Math.floor(Date.now() / 1000);
     const timeMatch = body.match(/class="[^"]*\bstate\b[^"]*"[^>]*>\s*([^<]+)/);
     if (timeMatch) {
@@ -468,14 +520,21 @@ export function parseFeeds3Comments(
       }
     }
 
+    const isReply = dataType === 'replyroot';
+    const finalCommentId = isReply && t2Tid
+      ? `${t2Tid}_r_${commentId}_${uin}`
+      : commentId;
+
     const comment: Record<string, unknown> = {
-      commentid: commentId,
+      commentid: finalCommentId,
       uin,
       name: nick,
       content,
       createtime: createdTime,
       _source: 'feeds3_html',
     };
+    if (isReply && t2Uin) (comment as Record<string, unknown>)['reply_to_uin'] = t2Uin;
+    if (isReply && t2Tid) (comment as Record<string, unknown>)['reply_to_comment_id'] = t2Tid;
 
     if (!result.has(postTid)) result.set(postTid, []);
     result.get(postTid)!.push(comment);
