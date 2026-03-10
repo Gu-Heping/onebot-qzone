@@ -2320,13 +2320,17 @@ export class QzoneClient {
       qzreferrer: this.getQzreferrer(),
     };
     
-    // 回复评论时添加 commentId 和 commentUin
+    // 回复评论时：同时传 commentId/commentUin（h5 抓包）与 t1_*/t2_*（文档/feeds3 约定，序号即 data-tid）
     if (replyCommentId && replyUin) {
       data['commentId'] = replyCommentId;
       data['commentUin'] = replyUin;
+      data['t1_uin'] = ouin;
+      data['t1_tid'] = tid;
+      data['t2_uin'] = replyUin;
+      data['t2_tid'] = replyCommentId;
     }
     
-    log('DEBUG', `commentEmotion: topicId=${data.topicId} paramstr=${data.paramstr} commentId=${replyCommentId ?? 'none'} commentUin=${replyUin ?? 'none'} content=${finalContent.substring(0, 50)}...`);
+    log('DEBUG', `commentEmotion: topicId=${data.topicId} paramstr=${data.paramstr} commentId=${replyCommentId ?? 'none'} commentUin=${replyUin ?? 'none'} t2_tid=${replyCommentId ?? 'none'} content=${finalContent.substring(0, 50)}...`);
     
     const resp = await this.post(url, {
       data: new URLSearchParams(data),
