@@ -1861,22 +1861,27 @@ export class QzoneClient {
     log('DEBUG', `getCommentsBestEffort: uin=${uin} tid=${tid} num=${num} pos=${pos}`);
     try {
       const p = await this.getComments(uin, tid, num, pos, 1, uin, tid);
-      if (p && !p['_empty'] && (p['code'] === undefined || p['code'] === 0)) {
-        log('INFO', `getCommentsBestEffort: 成功 (t1_source=1) 评论数≈${this.commentCount(p)}`);
+      const c1 = this.commentCount(p);
+      if (p && !p['_empty'] && (p['code'] === undefined || p['code'] === 0) && c1 > 0) {
+        log('INFO', `getCommentsBestEffort: 成功 (t1_source=1) 评论数≈${c1}`);
         return p;
       }
     } catch (e) { log('DEBUG', `getCommentsBestEffort t1_source=1 异常: ${e}`); }
     try {
       const p = await this.getComments(uin, tid, num, pos, 0);
-      if (p && !p['_empty'] && (p['code'] === undefined || p['code'] === 0)) {
-        log('INFO', `getCommentsBestEffort: 成功 (t1_source=0) 评论数≈${this.commentCount(p)}`);
+      const c0 = this.commentCount(p);
+      if (p && !p['_empty'] && (p['code'] === undefined || p['code'] === 0) && c0 > 0) {
+        log('INFO', `getCommentsBestEffort: 成功 (t1_source=0) 评论数≈${c0}`);
         return p;
       }
     } catch (e) { log('DEBUG', `getCommentsBestEffort t1_source=0 异常: ${e}`); }
     try {
       const p = await this.getCommentsMobile(uin, tid, num, pos);
-      log('INFO', `getCommentsBestEffort: 使用 mobile 评论数≈${this.commentCount(p)}`);
-      return p;
+      const cnt = this.commentCount(p);
+      if (p && !p['_empty'] && (p['code'] === undefined || p['code'] === 0) && cnt > 0) {
+        log('INFO', `getCommentsBestEffort: 使用 mobile 评论数≈${cnt}`);
+        return p;
+      }
     } catch (e) { log('DEBUG', `getCommentsBestEffort mobile 异常: ${e}`); }
 
     // 兜底：使用 feeds3 拉取说说时已解析出的评论（仅覆盖最近通过 getEmotionList/getFriendFeeds 拉过的说说）
@@ -1886,8 +1891,24 @@ export class QzoneClient {
     if (!feeds3List || feeds3List.length === 0) {
       log('INFO', `getCommentsBestEffort: feeds3Comments 缓存未命中，主动拉取 uin=${uin} tid=${tid}`);
       try {
-        const htmlText = await this.fetchFeeds3Html(uin, true, 1, 50);
-        const comments = _parseFeeds3Comments(htmlText);
+        // 先试 scope=0（好友动态流，与 getEmotionList 成功路径一致），再试 scope=1
+        let htmlText = await this.fetchFeeds3Html(uin, true, 0, 50);
+        let comments = _parseFeeds3Comments(htmlText);
+        if ((comments.get(tid)?.length ?? 0) === 0) {
+          htmlText = await this.fetchFeeds3Html(uin, true, 1, 50);
+          const more = _parseFeeds3Comments(htmlText);
+          for (const [postTid, cmts] of more) {
+            const existing = comments.get(postTid);
+            if (existing) {
+              const seenIds = new Set(existing.map(c => String(c['commentid'])));
+              for (const c of cmts) {
+                if (!seenIds.has(String(c['commentid']))) existing.push(c);
+              }
+            } else {
+              comments.set(postTid, [...cmts]);
+            }
+          }
+        }
         // 合并到缓存
         for (const [postTid, cmts] of comments) {
           const existing = this.feeds3Comments.get(postTid);
@@ -1918,8 +1939,9 @@ export class QzoneClient {
       };
     }
 
+    // 已尝试 feeds3 兜底但该帖无评论或解析不到：返回空列表，不返回 _empty，方便 napcat 展示「暂无评论」
     log('WARNING', `getCommentsBestEffort: 全部失败 (含无 feeds3 兜底)`);
-    return { code: -1, message: 'all comment methods failed' };
+    return { code: 0, commentlist: [], _source: 'feeds3', _feeds3_total: 0 };
   }
 
   /**
