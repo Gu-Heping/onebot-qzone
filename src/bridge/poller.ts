@@ -206,7 +206,19 @@ function normalizeComment(raw: Record<string, unknown>): QzoneComment {
   const nickname = stripHtml(String(raw['name'] ?? raw['nick'] ?? ''));
   const content = stripHtml(String(raw['content'] ?? raw['con'] ?? ''));
   const createdTime = safeInt(raw['createtime'] ?? raw['create_time'] ?? raw['time'] ?? 0);
-  return { commentId, uin, nickname, content, createdTime };
+  const isReply = !!(raw['is_reply'] ?? raw['isReply']);
+  const replyToUin = raw['reply_to_uin'] != null ? String(raw['reply_to_uin']) : (raw['replyToUin'] != null ? String(raw['replyToUin']) : undefined);
+  const replyToNickname = raw['reply_to_nickname'] != null ? stripHtml(String(raw['reply_to_nickname'])) : (raw['replyToNickname'] != null ? stripHtml(String(raw['replyToNickname'])) : undefined);
+  const replyToCommentId = raw['reply_to_comment_id'] != null ? String(raw['reply_to_comment_id']) : (raw['replyToCommentId'] != null ? String(raw['replyToCommentId']) : undefined);
+  const parentCommentId = raw['parent_comment_id'] != null ? String(raw['parent_comment_id']) : (raw['parentCommentId'] != null ? String(raw['parentCommentId']) : undefined);
+  return {
+    commentId, uin, nickname, content, createdTime,
+    ...(isReply && { isReply: true }),
+    ...(replyToUin && { replyToUin }),
+    ...(replyToNickname && { replyToNickname }),
+    ...(replyToCommentId && { replyToCommentId }),
+    ...(parentCommentId && { parentCommentId }),
+  };
 }
 
 function normalizeLike(raw: Record<string, unknown>): QzoneLike {
@@ -289,7 +301,7 @@ function buildPostEvent(item: NormalizedItem, selfId: string): OneBotEvent {
 }
 
 function buildCommentEvent(comment: QzoneComment, postUin: string, postTid: string, selfId: string): OneBotEvent {
-  return {
+  const ev: OneBotEvent = {
     time: comment.createdTime || now(),
     self_id: safeInt(selfId),
     post_type: 'notice',
@@ -301,6 +313,11 @@ function buildCommentEvent(comment: QzoneComment, postUin: string, postTid: stri
     post_uin: safeInt(postUin),
     post_tid: postTid,
   };
+  if (comment.isReply) ev._is_reply = true;
+  if (comment.replyToUin) ev._reply_to_uin = comment.replyToUin;
+  if (comment.replyToNickname) ev._reply_to_nickname = comment.replyToNickname;
+  if (comment.parentCommentId) ev._parent_comment_id = comment.parentCommentId;
+  return ev;
 }
 
 function buildLikeEvent(like: QzoneLike, postUin: string, postTid: string, selfId: string): OneBotEvent {
