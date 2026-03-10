@@ -2282,9 +2282,16 @@ export class QzoneClient {
     // 回复评论时，需要在 content 前添加 @提及 格式：@{uin:xxx,nick:xxx,auto:1}
     let finalContent = content;
     if (replyCommentId && replyUin) {
-      // 获取被回复者的昵称（优先从好友缓存，否则用 UIN）
-      const friendInfo = this.friendCache.get(replyUin);
-      const nick = friendInfo?.nickname || replyUin;
+      // 获取被回复者的昵称
+      let nick: string;
+      if (replyUin === this.qqNumber) {
+        // 回复自己的评论：从 Cookie 获取自己的昵称
+        nick = this.getNicknameFromCookie() || replyUin;
+      } else {
+        // 回复他人的评论：从好友缓存获取昵称
+        const friendInfo = this.friendCache.get(replyUin);
+        nick = friendInfo?.nickname || replyUin;
+      }
       // 如果 content 没有以 @{ 开头，自动添加 @提及 前缀
       if (!content.startsWith('@{')) {
         finalContent = `@{uin:${replyUin},nick:${nick},auto:1} ${content}`;
