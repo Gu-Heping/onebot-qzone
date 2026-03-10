@@ -49,6 +49,30 @@ export interface PostMeta {
   abstime: number;
 }
 
+/** 图片元数据结构 */
+export interface PictureMeta {
+  /** 图片 URL */
+  url: string;
+  /** 原始高清 URL（从 data-pickey 提取） */
+  originalUrl?: string;
+  /** 图片宽度 */
+  width?: number;
+  /** 图片高度 */
+  height?: number;
+}
+
+/** 音乐分享元数据 */
+export interface MusicShareMeta {
+  /** 歌曲名 */
+  songName: string;
+  /** 歌手名 */
+  artistName?: string;
+  /** 封面图 URL */
+  coverUrl?: string;
+  /** 播放链接 */
+  playUrl?: string;
+}
+
 export interface NormalizedItem {
   tid: string | null;
   uin: string | null;
@@ -58,6 +82,8 @@ export interface NormalizedItem {
   cmtnum: number;
   fwdnum: number;
   pics: string[];
+  /** 图片详细元数据（含原始 URL、尺寸） */
+  picsMeta?: PictureMeta[];
   videos?: string[];
   forwardContent?: string;
   forwardUin?: string;
@@ -75,6 +101,8 @@ export interface NormalizedItem {
   likeUnikey?: string;
   /** 点赞 API curkey（`00{ouin}00{abstime}` 格式） */
   likeCurkey?: string;
+  /** 音乐分享元数据（appid=202/2100 时填充） */
+  musicShare?: MusicShareMeta;
 }
 
 export interface QzoneComment {
@@ -83,6 +111,16 @@ export interface QzoneComment {
   nickname: string;
   content: string;
   createdTime: number;
+  /** 回复目标用户 QQ 号（二级评论） */
+  replyToUin?: string;
+  /** 回复目标用户昵称（二级评论） */
+  replyToNickname?: string;
+  /** 回复目标评论 ID（二级评论） */
+  replyToCommentId?: string;
+  /** 父评论 ID（二级评论所属的一级评论） */
+  parentCommentId?: string;
+  /** 是否为二级评论（回复） */
+  isReply?: boolean;
 }
 
 export interface QzoneLike {

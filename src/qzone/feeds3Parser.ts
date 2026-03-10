@@ -93,8 +93,12 @@ export function parseFeeds3Items(
     let nickname = '';
     let cmtnum = 0;
     const images: string[] = [];
+    const picsMeta: Array<{ url: string; originalUrl?: string; width?: number; height?: number }> = [];
 
-    const isForward = !!(origTid && origTid !== tid);
+    // 从 matchedBlock 提前获取 typeid（用于转发检测）
+    const blockTypeid = matchedBlock?.typeid ?? '';
+    // 转发检测：优先检查 typeid=5，同时检查 origTid 差异
+    const isForward = blockTypeid === '5' || !!(origTid && origTid !== tid && origUin && origUin !== dataUin);
     let rt_tid = '';
     let rt_uin = '';
     let rt_uinname = '';
@@ -193,12 +197,36 @@ export function parseFeeds3Items(
 
     const fullRegion = searchBefore + searchAfter;
     const regionDecoded = htmlUnescape(fullRegion);
+
+    // ── 增强图片提取：优先从 data-pickey 提取原始 URL 和尺寸元数据 ──
+    // data-pickey 格式："{tid},{photo.store.qq.com 原始URL}"
+    const picKeyPat = /<a[^>]+class="img-item[^"]*"[^>]*data-pickey="([^,]+),([^"]+)"[^>]*>/gi;
+    let picKeyMatch: RegExpExecArray | null;
+    while ((picKeyMatch = picKeyPat.exec(regionDecoded)) !== null) {
+      const originalUrl = picKeyMatch[2]!;
+      if (!images.includes(originalUrl)) {
+        images.push(originalUrl);
+        // 提取尺寸元数据
+        const imgItemTag = picKeyMatch[0];
+        const widthM = imgItemTag.match(/data-width="(\d+)"/);
+        const heightM = imgItemTag.match(/data-height="(\d+)"/);
+        picsMeta.push({
+          url: originalUrl,
+          originalUrl,
+          width: widthM ? parseInt(widthM[1]!, 10) : undefined,
+          height: heightM ? parseInt(heightM[1]!, 10) : undefined,
+        });
+      }
+    }
+
+    // Fallback：从 <img src> 提取（排除已提取的）
     for (const im of regionDecoded.matchAll(/<img[^>]+src="([^"]+)"/gi)) {
       const src = im[1]!;
       if ((src.includes('qpic.cn') || src.includes('photo.store.qq.com') ||
            /\.(jpg|jpeg|png|gif|webp)$/i.test(src)) &&
           !src.includes('qlogo') && !images.includes(src)) {
         images.push(src);
+        picsMeta.push({ url: src });
       }
     }
 
@@ -209,6 +237,7 @@ export function parseFeeds3Items(
     let appShareTitle = '';
     let likeUnikey = '';
     let likeCurkey = '';
+    let musicShare: { songName: string; artistName?: string; coverUrl?: string; playUrl?: string } | undefined;
 
     if (appid && appid !== '311') {
       const searchAll = searchBefore + searchAfter;
@@ -218,12 +247,39 @@ export function parseFeeds3Items(
         ?? searchAll.match(/<[^>]+class="[^"]*(?:app-name|f-app-name)[^"]*"[^>]*>([\s\S]*?)<\/[a-z]+>/i);
       if (appNameM) appName = appNameM[1]!.replace(/<[^>]+>/g, '').trim();
 
-      // appShareTitle：<p class="ell">、f-ct-title、app-title 等区域
-      const titleM = searchAll.match(/<p[^>]*class="[^"]*ell[^"]*"[^>]*>([\s\S]*?)<\/p>/i)
-        ?? searchAll.match(/<[^>]+class="[^"]*(?:f-ct-title|app-title|app-content-title)[^"]*"[^>]*>([\s\S]*?)<\/[a-z]+>/i);
-      if (titleM) appShareTitle = titleM[1]!.replace(/<[^>]+>/g, '').replace(/&nbsp;/gi, ' ').trim();
+      // ── 音乐分享专用解析（appid=202=网易云音乐，appid=2100=QQ音乐等）──
+      if (appid === '202' || appid === '2100') {
+        // 提取歌曲名：<h4 class="txt-box-title"><a>{歌曲名}</a></h4>
+        const songNameM = searchAll.match(/<h4[^>]+class="[^"]*txt-box-title[^"]*"[^>]*>[\s\S]*?<a[^>]*>([^<]+)<\/a>/i);
+        // 提取歌手名：<a class="f-name info state ellipsis-two">{歌手名}</a>
+        const artistNameM = searchAll.match(/<a[^>]+class="[^"]*f-name[^"]*info[^"]*"[^>]*>([^<]+)<\/a>/i);
+        // 提取封面图：<img trueSrc="{封面URL}">（JS 延迟加载）
+        const coverM = searchAll.match(/<img[^>]+trueSrc="([^"]+)"/i);
+        // 提取播放链接：<a href="{播放链接}"> 在 img-box 内
+        const playUrlM = searchAll.match(/<div[^>]+class="[^"]*img-box[^"]*"[^>]*>[\s\S]*?<a[^>]+href="([^"]+)"/i);
 
-      // unikey：data-unikey 属性（点赞按钮上）或直接是分享链接
+        if (songNameM) {
+          musicShare = {
+            songName: songNameM[1]!.trim(),
+            artistName: artistNameM?.[1]?.trim(),
+            coverUrl: coverM?.[1],
+            playUrl: playUrlM?.[1],
+          };
+          // 音乐分享的 appShareTitle 设为「歌曲名 - 歌手名」格式
+          appShareTitle = musicShare.songName + (musicShare.artistName ? ` - ${musicShare.artistName}` : '');
+          log('DEBUG', `parseFeeds3Items: music share detected, song=${musicShare.songName}, artist=${musicShare.artistName ?? '(unknown)'}`);
+        }
+      }
+
+      // 非 musicShare 情况下的 appShareTitle 提取
+      if (!musicShare) {
+        // appShareTitle：<p class="ell">、f-ct-title、app-title 等区域
+        const titleM = searchAll.match(/<p[^>]*class="[^"]*ell[^"]*"[^>]*>([\s\S]*?)<\/p>/i)
+          ?? searchAll.match(/<[^>]+class="[^"]*(?:f-ct-title|app-title|app-content-title)[^"]*"[^>]*>([\s\S]*?)<\/[a-z]+>/i);
+        if (titleM) appShareTitle = titleM[1]!.replace(/<[^>]+>/g, '').replace(/&nbsp;/gi, ' ').trim();
+      }
+
+      // unikey：优先从 data-unikey 属性提取（点赞按钮上）
       const unM = searchAll.match(/data-unikey="([^"]+)"/i)
         ?? searchAll.match(/unikey\s*[:=]\s*['"]([^'"]+)['"]/i);
       if (unM) likeUnikey = unM[1]!;
@@ -234,16 +290,17 @@ export function parseFeeds3Items(
         if (hrefM) likeUnikey = hrefM[1]!;
       }
 
-      // curkey：data-curkey 属性 或 JS 数据中的 curkey 字段
+      // curkey：优先从 HTML 的 data-curkey 属性提取（不再推算）
       const ckM = searchAll.match(/data-curkey="([^"]+)"/i)
         ?? searchAll.match(/curkey\s*[:=]\s*['"]([^'"]+)['"]/i);
       if (ckM) likeCurkey = ckM[1]!;
 
-      // 如果 curkey 未从 HTML 提取到，按已知公式推算：00{ouin}00{abstime}
+      // 仅在无法从 HTML 提取时才按公式推算 curkey
       if (!likeCurkey && dataUin && abstime) {
         const ts = abstime || (matchedBlock?.timestamp ?? 0);
         if (ts) {
           likeCurkey = '00' + dataUin.padStart(10, '0') + '00' + String(ts).padStart(10, '0');
+          log('DEBUG', `parseFeeds3Items: curkey calculated from formula: ${likeCurkey}`);
         }
       }
     }
@@ -278,12 +335,14 @@ export function parseFeeds3Items(
       created_time: timestamp, createTime: String(timestamp),
       cmtnum, fwdnum: isForward ? 1 : 0,
       pic: images.map(u => ({ url: u })),
+      picsMeta: picsMeta.length > 0 ? picsMeta : undefined,
       appid,
       typeid,
       appName,
       appShareTitle,
       likeUnikey,
       likeCurkey,
+      musicShare,
       isLiked,
       _source: 'feeds3',
     };
@@ -409,7 +468,117 @@ export interface Feeds3Comment {
   name: string;
   content: string;
   createtime: number;
+  /** 回复目标用户 QQ 号（二级评论） */
+  reply_to_uin?: string;
+  /** 回复目标用户昵称（二级评论，从 HTML 回复链接提取） */
+  reply_to_nickname?: string;
+  /** 回复目标评论 ID（二级评论） */
+  reply_to_comment_id?: string;
+  /** 父评论 ID（二级评论所属的一级评论） */
+  parent_comment_id?: string;
+  /** 是否为二级评论（回复） */
+  is_reply?: boolean;
   _source: 'feeds3_html';
+}
+
+/**
+ * 从文本中提取回复目标昵称。
+ * 回复格式：`{昵称}&nbsp;回复<a class="nickname">{目标昵称}</a>&nbsp;:&nbsp;{内容}`
+ * 或简化格式：`{昵称} 回复 @{目标昵称} : {内容}`
+ */
+function extractReplyToNickname(body: string): string | null {
+  // 模式1：<a class="nickname">评论者</a>&nbsp;回复<a class="nickname">目标昵称</a>
+  // 注意：回复后面可能没有空格，直接紧跟 <a> 标签
+  const htmlPattern = /<a[^>]*class="[^"]*nickname[^"]*"[^>]*>[^<]*<\/a>(?:&nbsp;|\s)*回复(?:&nbsp;|\s)*<a[^>]*class="[^"]*nickname[^"]*"[^>]*>([^<]+)<\/a>/i;
+  const htmlMatch = body.match(htmlPattern);
+  if (htmlMatch) {
+    return htmlUnescape(htmlMatch[1]!.trim());
+  }
+
+  // 模式2：纯文本 "回复 @目标昵称 :"
+  const textPattern = /回复\s*[@＠]([^:：\s]+)/i;
+  const textMatch = body.match(textPattern);
+  if (textMatch) {
+    return htmlUnescape(textMatch[1]!.trim());
+  }
+
+  return null;
+}
+
+/**
+ * 解析评论内容，支持一级评论和二级回复两种格式。
+ * - 一级评论：`<a class="nickname">昵称</a>&nbsp;:&nbsp;内容`
+ * - 二级回复：`<a class="nickname">昵称</a>&nbsp;回复<a class="nickname">目标</a>&nbsp;:&nbsp;内容`
+ */
+function extractCommentContent(body: string, isReply: boolean): string {
+  // 二级回复：提取 "回复 ... :" 之后的内容
+  if (isReply && body.includes('回复')) {
+    // 模式：<a>昵称</a>&nbsp;回复<a>目标</a>&nbsp;:&nbsp;内容
+    // 注意：回复后面可能没有空格，直接紧跟 <a> 标签
+    const replyPattern = /<a[^>]*class="[^"]*nickname[^"]*"[^>]*>[^<]*<\/a>(?:&nbsp;|\s)*回复(?:&nbsp;|\s)*<a[^>]*class="[^"]*nickname[^"]*"[^>]*>[^<]*<\/a>(?:&nbsp;|\s)*[:：](?:&nbsp;|\s)*([\s\S]*?)(?:<div\s+class="comments-op|<div\s+class="mod-comments-sub|$)/i;
+    const replyMatch = body.match(replyPattern);
+    if (replyMatch) {
+      return htmlUnescape(replyMatch[1]!.replace(/<[^>]+>/g, '')).trim();
+    }
+
+    // Fallback：简化匹配 "回复 ... : 内容"
+    const simplePattern = /回复[\s\S]*?[:：]\s*([\s\S]*?)(?:<div\s+class="comments-op|<div\s+class="mod-comments-sub|$)/i;
+    const simpleMatch = body.match(simplePattern);
+    if (simpleMatch) {
+      return htmlUnescape(simpleMatch[1]!.replace(/<[^>]+>/g, '')).trim();
+    }
+  }
+
+  // 一级评论：<a class="nickname">昵称</a>&nbsp;:&nbsp;内容
+  const rootPattern = /<a[^>]*class="[^"]*nickname[^"]*"[^>]*>[^<]*<\/a>(?:&nbsp;|\s)*[:：](?:&nbsp;|\s)*([\s\S]*?)(?:<div\s+class="comments-op|<div\s+class="mod-comments-sub|$)/i;
+  const rootMatch = body.match(rootPattern);
+  if (rootMatch) {
+    return htmlUnescape(rootMatch[1]!.replace(/<[^>]+>/g, '')).trim();
+  }
+
+  return '';
+}
+
+/**
+ * 解析评论时间戳。
+ * 支持格式：「HH:mm」「昨天 HH:mm」「前天 HH:mm」「MM-DD」「YYYY-MM-DD」
+ */
+function parseCommentTime(body: string): number {
+  const timeMatch = body.match(/class="[^"]*\bstate\b[^"]*"[^>]*>\s*([^<]+)/);
+  if (!timeMatch) return Math.floor(Date.now() / 1000);
+
+  const ts = timeMatch[1]!.trim();
+  const d = new Date();
+
+  // HH:mm（今天）
+  const hm = ts.match(/(\d{1,2}):(\d{2})/);
+  if (hm) {
+    if (ts.includes('昨天')) d.setDate(d.getDate() - 1);
+    else if (ts.includes('前天')) d.setDate(d.getDate() - 2);
+    else if (!ts.includes('月') && !ts.includes('-')) {
+      // 纯时间，默认今天
+    }
+    d.setHours(parseInt(hm[1]!, 10), parseInt(hm[2]!, 10), 0, 0);
+    return Math.floor(d.getTime() / 1000);
+  }
+
+  // MM-DD 或 MM月DD日
+  const md = ts.match(/(\d{1,2})[-月](\d{1,2})/);
+  if (md) {
+    d.setMonth(parseInt(md[1]!, 10) - 1, parseInt(md[2]!, 10));
+    d.setHours(0, 0, 0, 0);
+    return Math.floor(d.getTime() / 1000);
+  }
+
+  // YYYY-MM-DD
+  const ymd = ts.match(/(\d{4})[-年](\d{1,2})[-月](\d{1,2})/);
+  if (ymd) {
+    d.setFullYear(parseInt(ymd[1]!, 10), parseInt(ymd[2]!, 10) - 1, parseInt(ymd[3]!, 10));
+    d.setHours(0, 0, 0, 0);
+    return Math.floor(d.getTime() / 1000);
+  }
+
+  return Math.floor(Date.now() / 1000);
 }
 
 /**
@@ -418,7 +587,6 @@ export interface Feeds3Comment {
  */
 function findMatchingClosingCommentsItemLi(text: string, start: number): number {
   const liCommentsOpen = /<li\s+class="comments-item/g;
-  const liClose = /<\/li>/g;
   let depth = 1;
   let pos = start;
   while (depth > 0 && pos < text.length) {
@@ -442,12 +610,47 @@ function findMatchingClosingCommentsItemLi(text: string, start: number): number 
 /**
  * 从 feeds3 HTML 中提取评论详情（含多级评论：commentroot + replyroot）。
  *
- * feeds3 的评论嵌在 `<li class="comments-item">` 内，含 data-type="commentroot"（一级）或 "replyroot"（回复）。
- * - `data-tid`  = 评论 ID
+ * ## 评论 HTML 结构
+ *
+ * 一级评论（commentroot）：
+ * ```html
+ * <li class="comments-item bor3" data-type="commentroot" data-tid="1" data-uin="2849419010" data-nick="go on." data-who="1">
+ *   <div class="comments-item-bd">
+ *     <div class="comments-content">
+ *       <a class="nickname c_tx">go on.</a>&nbsp;:&nbsp;评论内容
+ *     </div>
+ *     <div class="comments-op">
+ *       <span class="state">14:20</span>
+ *       <a class="reply" data-param="t1_source=...&t1_tid=xxx&t1_uin=xxx">回复</a>
+ *     </div>
+ *   </div>
+ *   <!-- 子评论区域 -->
+ *   <div class="comments-list mod-comments-sub">
+ *     <ul>...</ul>
+ *   </div>
+ * </li>
+ * ```
+ *
+ * 二级回复（replyroot）嵌套在一级评论的 `mod-comments-sub` 中：
+ * ```html
+ * <li class="comments-item bor3" data-type="replyroot" data-tid="1" data-uin="48166892" data-nick="像风一样的速度">
+ *   <div class="comments-content">
+ *     <a class="nickname c_tx">像风一样的速度</a>&nbsp;回复&nbsp;<a class="nickname c_tx">go on.</a>&nbsp;:&nbsp;回复内容
+ *   </div>
+ *   <div class="comments-op">
+ *     <a class="reply" data-param="t1_tid=xxx&t2_uin=2849419010&t2_tid=1">回复</a>
+ *   </div>
+ * </li>
+ * ```
+ *
+ * ## 参数说明
+ * - `data-tid`  = 评论序号（在该帖子内从 1 递增）
  * - `data-uin`  = 评论者 QQ
  * - `data-nick` = 评论者昵称
- * - 一级正文格式：nickname : TEXT；回复格式：nickname 回复 target : TEXT
- * - 所属说说 TID 在同条块 `data-param` 的 `t1_tid=` 中；回复的被回复人/评论在 `t2_uin`/`t2_tid` 中
+ * - `t1_tid`    = 帖子 TID
+ * - `t1_uin`    = 帖子主人 QQ
+ * - `t2_uin`    = 被回复者 QQ（二级评论）
+ * - `t2_tid`    = 被回复评论的序号（二级评论）
  *
  * 返回 Map<postTid, commentRecords[]>，可直接传给 normalizeComment()。
  * @param text  feeds3_html_more 原始文本（已 unescape）
@@ -457,7 +660,7 @@ export function parseFeeds3Comments(
 ): Map<string, Record<string, unknown>[]> {
   const result = new Map<string, Record<string, unknown>[]>();
 
-  // 先收集全文所有 t1_tid 出现位置
+  // 先收集全文所有 t1_tid 出现位置，用于关联评论到帖子
   const tidRefs: { index: number; postTid: string }[] = [];
   const tidPat = /t1_tid=([a-z0-9]+)/gi;
   let tidM: RegExpExecArray | null;
@@ -465,81 +668,176 @@ export function parseFeeds3Comments(
     tidRefs.push({ index: tidM.index, postTid: tidM[1]! });
   }
 
-  const itemStartPat = /<li\s+class="comments-item[^"]*"([^>]*)>/g;
-  let m: RegExpExecArray | null;
+  // 匹配一级评论（data-type="commentroot"）
+  const rootCommentPat = /<li\s+class="comments-item[^"]*"[^>]*data-type="commentroot"[^>]*>/gi;
+  let rootMatch: RegExpExecArray | null;
 
-  while ((m = itemStartPat.exec(text)) !== null) {
-    const attrs = m[1]!;
-    const openEnd = m.index + m[0].length;
+  while ((rootMatch = rootCommentPat.exec(text)) !== null) {
+    const openTag = rootMatch[0];
+    const openEnd = rootMatch.index + openTag.length;
     const closeEnd = findMatchingClosingCommentsItemLi(text, openEnd);
     if (closeEnd < 0) continue;
+
+    const fullBlock = text.slice(rootMatch.index, closeEnd);
     const body = text.slice(openEnd, closeEnd - 6);
 
-    const commentId = attrs.match(/data-tid="([^"]*)"/) ?.[1] ?? '';
-    const uin       = attrs.match(/data-uin="([^"]*)"/) ?.[1] ?? '';
-    const nick      = attrs.match(/data-nick="([^"]*)"/) ?.[1] ?? '';
-    const dataType  = attrs.match(/data-type="([^"]*)"/) ?.[1] ?? '';
-    if (!commentId) continue;
+    // 提取一级评论属性
+    const rootTid = openTag.match(/data-tid="([^"]*)"/)?.[1] ?? '';
+    const rootUin = openTag.match(/data-uin="([^"]*)"/)?.[1] ?? '';
+    const rootNick = openTag.match(/data-nick="([^"]*)"/)?.[1] ?? '';
+    if (!rootTid) continue;
 
-    let postTid = body.match(/t1_tid=([a-z0-9]+)/i)?.[1] ?? '';
+    // 提取帖子 TID（t1_tid）
+    let postTid = fullBlock.match(/t1_tid=([a-z0-9]+)/i)?.[1] ?? '';
     if (!postTid && tidRefs.length) {
-      const commentEnd = closeEnd;
-      const next = tidRefs.find((r) => r.index >= commentEnd);
+      const next = tidRefs.find((r) => r.index >= closeEnd);
       if (next) postTid = next.postTid;
       else postTid = tidRefs[tidRefs.length - 1]!.postTid;
     }
     if (!postTid) continue;
 
+    // 解析一级评论内容
+    const rootContent = extractCommentContent(body, false);
+    const rootTime = parseCommentTime(body);
+
+    // 构建一级评论对象
+    const rootComment: Record<string, unknown> = {
+      commentid: rootTid,
+      uin: rootUin,
+      name: rootNick,
+      content: rootContent,
+      createtime: rootTime,
+      is_reply: false,
+      _source: 'feeds3_html',
+    };
+
+    if (!result.has(postTid)) result.set(postTid, []);
+    result.get(postTid)!.push(rootComment);
+
+    // ── 解析嵌套的二级回复 ──
+    // 二级回复在 <div class="comments-list mod-comments-sub"> 内
+    const subCommentsPat = /<div[^>]*class="[^"]*mod-comments-sub[^"]*"[^>]*>[\s\S]*?<ul>([\s\S]*?)<\/ul>[\s\S]*?<\/div>/gi;
+    let subBlockMatch: RegExpExecArray | null;
+    while ((subBlockMatch = subCommentsPat.exec(fullBlock)) !== null) {
+      const subUl = subBlockMatch[1]!;
+
+      // 匹配二级回复（data-type="replyroot"）
+      const replyPat = /<li\s+class="comments-item[^"]*"[^>]*data-type="replyroot"[^>]*>/gi;
+      let replyMatch: RegExpExecArray | null;
+      while ((replyMatch = replyPat.exec(subUl)) !== null) {
+        const replyOpenTag = replyMatch[0];
+        const replyOpenEnd = replyMatch.index + replyOpenTag.length;
+
+        // 二级回复的 </li>（在 subUl 范围内查找）
+        const replyCloseEnd = findMatchingClosingCommentsItemLi(subUl, replyOpenEnd);
+        if (replyCloseEnd < 0) continue;
+
+        const replyBody = subUl.slice(replyOpenEnd, replyCloseEnd - 6);
+
+        // 提取二级回复属性
+        const replyTid = replyOpenTag.match(/data-tid="([^"]*)"/)?.[1] ?? '';
+        const replyUin = replyOpenTag.match(/data-uin="([^"]*)"/)?.[1] ?? '';
+        const replyNick = replyOpenTag.match(/data-nick="([^"]*)"/)?.[1] ?? '';
+        if (!replyTid) continue;
+
+        // 提取 t2_uin（被回复者）和 t2_tid（被回复评论序号）
+        const t2Uin = replyBody.match(/t2_uin=(\d+)/i)?.[1] ?? '';
+        const t2Tid = replyBody.match(/t2_tid=([^&"\s]+)/i)?.[1] ?? '';
+
+        // 提取回复目标昵称（从 HTML 内容）
+        const replyToNickname = extractReplyToNickname(replyBody);
+
+        // 解析二级回复内容
+        const replyContent = extractCommentContent(replyBody, true);
+        const replyTime = parseCommentTime(replyBody);
+
+        // 构建二级回复对象
+        // commentid 格式：{父评论tid}_{回复序号}_{回复者uin}
+        const finalReplyId = t2Tid
+          ? `${rootTid}_r_${replyTid}_${replyUin}`
+          : `${rootTid}_${replyTid}_${replyUin}`;
+
+        const replyComment: Record<string, unknown> = {
+          commentid: finalReplyId,
+          uin: replyUin,
+          name: replyNick,
+          content: replyContent,
+          createtime: replyTime,
+          is_reply: true,
+          parent_comment_id: rootTid,
+          _source: 'feeds3_html',
+        };
+
+        if (t2Uin) replyComment['reply_to_uin'] = t2Uin;
+        if (replyToNickname) replyComment['reply_to_nickname'] = replyToNickname;
+        if (t2Tid) replyComment['reply_to_comment_id'] = t2Tid;
+
+        result.get(postTid)!.push(replyComment);
+      }
+    }
+  }
+
+  // ── Fallback：处理没有 data-type 属性的旧格式评论 ──
+  // 某些旧版页面可能不区分 commentroot/replyroot
+  const legacyCommentPat = /<li\s+class="comments-item[^"]*"([^>]*)>/g;
+  let legacyMatch: RegExpExecArray | null;
+  const seenCommentIds = new Set<string>();
+
+  // 收集已解析的评论 ID，避免重复
+  for (const comments of result.values()) {
+    for (const c of comments) {
+      seenCommentIds.add(c['commentid'] as string);
+    }
+  }
+
+  while ((legacyMatch = legacyCommentPat.exec(text)) !== null) {
+    const attrs = legacyMatch[1]!;
+    // 跳过已处理的 commentroot/replyroot
+    if (attrs.includes('data-type="commentroot"') || attrs.includes('data-type="replyroot"')) {
+      continue;
+    }
+
+    const openEnd = legacyMatch.index + legacyMatch[0].length;
+    const closeEnd = findMatchingClosingCommentsItemLi(text, openEnd);
+    if (closeEnd < 0) continue;
+    const body = text.slice(openEnd, closeEnd - 6);
+
+    const commentId = attrs.match(/data-tid="([^"]*)"/)?.[1] ?? '';
+    const uin = attrs.match(/data-uin="([^"]*)"/)?.[1] ?? '';
+    const nick = attrs.match(/data-nick="([^"]*)"/)?.[1] ?? '';
+    if (!commentId || seenCommentIds.has(commentId)) continue;
+    seenCommentIds.add(commentId);
+
+    let postTid = body.match(/t1_tid=([a-z0-9]+)/i)?.[1] ?? '';
+    if (!postTid && tidRefs.length) {
+      const next = tidRefs.find((r) => r.index >= closeEnd);
+      if (next) postTid = next.postTid;
+      else postTid = tidRefs[tidRefs.length - 1]!.postTid;
+    }
+    if (!postTid) continue;
+
+    const isReply = body.includes('回复');
+    const content = extractCommentContent(body, isReply);
+    const createdTime = parseCommentTime(body);
     const t2Uin = body.match(/t2_uin=(\d+)/i)?.[1] ?? '';
     const t2Tid = body.match(/t2_tid=([^&"\s]+)/i)?.[1] ?? '';
-
-    let content = '';
-    if (dataType === 'replyroot' && body.includes('回复')) {
-      const replyMatch = body.match(/回复[\s\S]*?<\/a>\s*:\s*([\s\S]*?)(?:<div\s+class="comments-op|$)/);
-      if (replyMatch) {
-        content = htmlUnescape(replyMatch[1]!.replace(/<[^>]+>/g, '')).trim();
-      }
-    }
-    if (!content) {
-      const contentMatch = body.match(
-        /<a\s+class="nickname[^"]*"[^>]*>[^<]*<\/a>(?:&nbsp;)?\s*:\s*([\s\S]*?)(?:<div\s+class="comments-op|$)/,
-      );
-      if (contentMatch) {
-        content = htmlUnescape(
-          contentMatch[1]!.replace(/<[^>]+>/g, ''),
-        ).trim();
-      }
-    }
-
-    let createdTime = Math.floor(Date.now() / 1000);
-    const timeMatch = body.match(/class="[^"]*\bstate\b[^"]*"[^>]*>\s*([^<]+)/);
-    if (timeMatch) {
-      const ts = timeMatch[1]!.trim();
-      const hm = ts.match(/(\d{1,2}):(\d{2})/);
-      if (hm) {
-        const d = new Date();
-        if (ts.includes('昨天')) d.setDate(d.getDate() - 1);
-        else if (ts.includes('前天')) d.setDate(d.getDate() - 2);
-        d.setHours(parseInt(hm[1]!, 10), parseInt(hm[2]!, 10), 0, 0);
-        createdTime = Math.floor(d.getTime() / 1000);
-      }
-    }
-
-    const isReply = dataType === 'replyroot';
-    const finalCommentId = isReply && t2Tid
-      ? `${t2Tid}_r_${commentId}_${uin}`
-      : commentId;
+    const replyToNickname = isReply ? extractReplyToNickname(body) : null;
 
     const comment: Record<string, unknown> = {
-      commentid: finalCommentId,
+      commentid: commentId,
       uin,
       name: nick,
       content,
       createtime: createdTime,
+      is_reply: isReply,
       _source: 'feeds3_html',
     };
-    if (isReply && t2Uin) (comment as Record<string, unknown>)['reply_to_uin'] = t2Uin;
-    if (isReply && t2Tid) (comment as Record<string, unknown>)['reply_to_comment_id'] = t2Tid;
+
+    if (isReply) {
+      if (t2Uin) comment['reply_to_uin'] = t2Uin;
+      if (replyToNickname) comment['reply_to_nickname'] = replyToNickname;
+      if (t2Tid) comment['reply_to_comment_id'] = t2Tid;
+    }
 
     if (!result.has(postTid)) result.set(postTid, []);
     result.get(postTid)!.push(comment);

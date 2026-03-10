@@ -108,16 +108,47 @@ const cmtnumPat = /class="f-ct[^"]*"[^>]*>(\d+)/;
 6. 从每个块中提取：内容、昵称、评论数
 7. 提取图片：匹配 `<img>` 标签中包含 `qpic.cn` 或常见图片扩展名的 URL
 
-### 图片提取
+### 图片提取（增强版）
+
+从 `data-pickey` 属性提取原始高清图片 URL 和尺寸元数据：
+
+```html
+<a class="img-item" data-pickey="{tid},{originalUrl}" data-width="1080" data-height="1920">
+  <img src="https://a1.qpic.cn/psc?..."><!-- 缩略图 -->
+</a>
+```
 
 ```typescript
-const blockDecoded = htmlUnescape(block);
-const images: string[] = [];
-for (const im of blockDecoded.matchAll(/<img[^>]+src="([^"]+)"/gi)) {
+// 优先从 data-pickey 提取原始 URL
+const picKeyPat = /<a[^>]+class="img-item[^"]*"[^>]*data-pickey="([^,]+),([^"]+)"[^>]*>/gi;
+const picsMeta: Array<{ url: string; originalUrl?: string; width?: number; height?: number }> = [];
+
+while ((picKeyMatch = picKeyPat.exec(regionDecoded)) !== null) {
+  const originalUrl = picKeyMatch[2]; // photo.store.qq.com 原始高清 URL
+  const imgItemTag = picKeyMatch[0];
+  const width = imgItemTag.match(/data-width="(\d+)"/)?.[1];
+  const height = imgItemTag.match(/data-height="(\d+)"/)?.[1];
+  picsMeta.push({ url: originalUrl, originalUrl, width, height });
+}
+
+// Fallback：从 <img src> 提取缩略图
+for (const im of regionDecoded.matchAll(/<img[^>]+src="([^"]+)"/gi)) {
   const src = im[1];
-  if (src.includes('qpic.cn') || /\.(jpg|jpeg|png|gif|webp)$/.test(src)) {
-    images.push(src);
+  if ((src.includes('qpic.cn') || src.includes('photo.store.qq.com')) && !src.includes('qlogo')) {
+    if (!picsMeta.find(p => p.url === src)) {
+      picsMeta.push({ url: src });
+    }
   }
+}
+```
+
+**返回结构**：
+```typescript
+interface PictureMeta {
+  url: string;           // 图片 URL
+  originalUrl?: string;  // 原始高清 URL（从 data-pickey 提取）
+  width?: number;        // 图片宽度
+  height?: number;       // 图片高度
 }
 ```
 
@@ -144,9 +175,89 @@ const pattern = new RegExp(
   cmtnum: number,       // 评论数
   fwdnum: 0,            // 转发数（feeds3 不提供，固定为 0）
   pic: Array<{url: string}>,  // 图片列表
+  picsMeta: Array<{     // 图片元数据（可选，含原始 URL 和尺寸）
+    url: string,
+    originalUrl?: string,
+    width?: number,
+    height?: number
+  }>,
+  appid: string,        // 应用 ID（311=说说，202=网易云音乐）
+  typeid: string,       // 类型 ID（0=原创，2=分享，5=转发）
+  appName: string,      // 第三方应用名称（如「网易云音乐」）
+  appShareTitle: string, // 分享标题
+  likeUnikey: string,   // 点赞 API unikey
+  likeCurkey: string,   // 点赞 API curkey
+  musicShare: {         // 音乐分享元数据（仅 appid=202/2100）
+    songName: string,   // 歌曲名
+    artistName?: string, // 歌手名
+    coverUrl?: string,  // 封面图 URL
+    playUrl?: string    // 播放链接
+  },
   _source: 'feeds3'     // 数据来源标记
 }
 ```
+
+## 特殊类型说说解析
+
+### 音乐分享（appid=202/2100）
+
+网易云音乐分享结构：
+
+```html
+<div class="fui-left-right f-ct-txtimg">
+  <div class="img-box">
+    <a href="https://y.music.163.com/...">
+      <img trueSrc="https://...cover.jpg"><!-- 封面图 -->
+    </a>
+  </div>
+  <div class="txt-box">
+    <h4 class="txt-box-title"><a>歌曲名</a></h4>
+    <a class="f-name info state ellipsis-two">歌手名</a>
+  </div>
+</div>
+<a class="qz_like_btn_v3" data-unikey="{play_url}" data-curkey="00{ouin}00{abstime}">
+```
+
+解析逻辑：
+- **歌曲名**：`<h4 class="txt-box-title"><a>{歌曲名}</a></h4>`
+- **歌手名**：`<a class="f-name info state ellipsis-two">{歌手名}</a>`
+- **封面图**：`<img trueSrc="{封面URL}">`（注意是 `trueSrc` 而非 `src`，用于 JS 延迟加载）
+- **播放链接**：`<div class="img-box">` 内的 `<a href="{播放链接}">`
+- **curkey**：优先从 `data-curkey` 属性提取，无法获取时才按公式 `00{ouin}00{abstime}` 推算
+
+### 转发说说（typeid=5）
+
+转发检测逻辑：
+
+```typescript
+// 优先检查 typeid=5，同时检查 origTid 差异
+const isForward = typeid === '5' ||
+  !!(origTid && origTid !== tid && origUin && origUin !== dataUin);
+```
+
+转发说说结构：
+
+```html
+<i name="feed_data" data-tid="{tid}" data-uin="{uin}"
+   data-origtid="{orig_tid}" data-origuin="{orig_uin}">
+<div class="txt-box">
+  <a class="nickname">{转发者昵称}</a>：{转发评论}
+  <a class="nickname">{原作者昵称}</a>：{原说说内容}
+</div>
+```
+
+解析结果：
+- `content`：转发者的评论内容
+- `rt_tid`：原说说 TID
+- `rt_uin`：原作者 UIN
+- `rt_uinname`：原作者昵称
+- `rt_con`：原说说内容
+
+### curkey 提取优先级
+
+1. **优先从 HTML 提取**：`data-curkey` 属性（点赞按钮上）
+2. **JS 数据字段**：`curkey:'...'` 或 `curkey: "..."`
+3. **公式推算**（仅在前两者都失败时）：`00{ouin.padStart(10,'0')}00{abstime.padStart(10,'0')}`
 
 ## 缓存策略
 
@@ -183,3 +294,170 @@ const pattern = new RegExp(
 - **scope=0**：好友动态流；以当前登录号请求时，需带完整翻页参数（见上节）才能稳定拿到多页；翻页需从响应 `main.externparam` 解析 `basetime`/`pagenum` 供下页请求使用。
 
 为尽量支持「指定好友说说」，fallback 时会额外尝试 **scope=0 + uinlist=目标好友**：以当前登录号拉取好友动态并传 `uinlist` 限定只含该好友。若 QQ 空间后端支持该参数过滤，则有机会在限流情况下仍拿到该好友的说说；若不支持，行为与未传 uinlist 一致。**推荐做法**：先拉 scope=0 好友说说流（与 getFriendFeeds 同源、游标翻页），再在内存中按 uin 过滤。
+
+## 评论解析
+
+feeds3 HTML 中的评论嵌在 `<li class="comments-item">` 内，支持多级嵌套结构。
+
+### HTML 结构
+
+#### 一级评论（commentroot）
+
+```html
+<li class="comments-item bor3" data-type="commentroot" data-tid="1" data-uin="2849419010" data-nick="go on." data-who="1">
+  <div class="comments-item-bd">
+    <div class="comments-content">
+      <a class="nickname c_tx q_namecard" link="nameCard_2849419010">go on.</a>&nbsp;:&nbsp;评论内容
+    </div>
+    <div class="comments-op">
+      <span class="state c_tx3">14:20</span>
+      <a class="reply" data-param="t1_source=1&t1_tid=xxx&t1_uin=xxx&sceneid=xxx">回复</a>
+    </div>
+  </div>
+  <!-- 子评论区域 -->
+  <div class="comments-list mod-comments-sub">
+    <ul>
+      <!-- 二级回复 -->
+    </ul>
+  </div>
+</li>
+```
+
+#### 二级回复（replyroot）
+
+二级回复嵌套在一级评论的 `mod-comments-sub` 容器中：
+
+```html
+<li class="comments-item bor3" data-type="replyroot" data-tid="1" data-uin="48166892" data-nick="像风一样的速度" data-who="1">
+  <div class="comments-content">
+    <a class="nickname c_tx q_namecard" link="nameCard_48166892">像风一样的速度</a>
+    &nbsp;回复&nbsp;
+    <a class="nickname c_tx q_namecard" link="nameCard_2849419010">go on.</a>
+    &nbsp;:&nbsp;回复内容
+  </div>
+  <div class="comments-op">
+    <span class="state c_tx3">昨天 15:30</span>
+    <a class="reply" data-param="t1_source=1&t1_tid=xxx&t1_uin=xxx&t2_uin=2849419010&t2_tid=1&sceneid=xxx">回复</a>
+  </div>
+</li>
+```
+
+### 属性说明
+
+| 属性 | 说明 |
+|------|------|
+| `data-type` | `commentroot`=一级评论，`replyroot`=二级回复 |
+| `data-tid` | 评论序号（在该帖子内从 1 递增） |
+| `data-uin` | 评论者 QQ 号 |
+| `data-nick` | 评论者昵称 |
+
+### data-param 参数
+
+回复按钮的 `data-param` 包含评论/回复所需的 API 参数：
+
+| 参数 | 说明 |
+|------|------|
+| `t1_source` | 来源标识 |
+| `t1_tid` | 帖子 TID |
+| `t1_uin` | 帖子主人 QQ |
+| `t2_uin` | 被回复者 QQ（二级评论） |
+| `t2_tid` | 被回复评论的序号（二级评论） |
+| `sceneid` | 场景 ID |
+
+### 解析逻辑
+
+```typescript
+// 1. 匹配一级评论（data-type="commentroot"）
+const rootCommentPat = /<li\s+class="comments-item[^"]*"[^>]*data-type="commentroot"[^>]*>/gi;
+
+// 2. 提取一级评论属性
+const rootTid = openTag.match(/data-tid="([^"]*)"/)?.[1];
+const rootUin = openTag.match(/data-uin="([^"]*)"/)?.[1];
+const rootNick = openTag.match(/data-nick="([^"]*)"/)?.[1];
+
+// 3. 解析嵌套的二级回复（在 mod-comments-sub 容器内）
+const subCommentsPat = /<div[^>]*class="[^"]*mod-comments-sub[^"]*"[^>]*>[\s\S]*?<ul>([\s\S]*?)<\/ul>/gi;
+const replyPat = /<li\s+class="comments-item[^"]*"[^>]*data-type="replyroot"[^>]*>/gi;
+
+// 4. 提取回复目标昵称
+// 模式：<a class="nickname">评论者</a>&nbsp;回复&nbsp;<a class="nickname">目标昵称</a>
+const replyToNickname = body.match(
+  /<a[^>]*class="[^"]*nickname[^"]*"[^>]*>[^<]*<\/a>(?:&nbsp;|\s)+回复(?:&nbsp;|\s)+<a[^>]*class="[^"]*nickname[^"]*"[^>]*>([^<]+)<\/a>/i
+)?.[1];
+```
+
+### 返回结构
+
+```typescript
+interface Feeds3Comment {
+  commentid: string;          // 评论 ID
+  uin: string;                // 评论者 QQ
+  name: string;               // 评论者昵称
+  content: string;            // 评论内容
+  createtime: number;         // Unix 时间戳
+  is_reply?: boolean;         // 是否为二级评论
+  reply_to_uin?: string;      // 回复目标用户 QQ（二级评论）
+  reply_to_nickname?: string; // 回复目标用户昵称（二级评论）
+  reply_to_comment_id?: string; // 回复目标评论 ID（二级评论）
+  parent_comment_id?: string; // 父评论 ID（二级评论所属的一级评论）
+  _source: 'feeds3_html';
+}
+```
+
+### 时间解析
+
+支持多种时间格式：
+
+| 格式 | 示例 | 解析方式 |
+|------|------|----------|
+| HH:mm | `14:20` | 当天时间 |
+| 昨天 HH:mm | `昨天 15:30` | 昨天 |
+| 前天 HH:mm | `前天 10:00` | 前天 |
+| MM-DD | `03-10` | 今年该日期 |
+| MM月DD日 | `3月10日` | 今年该日期 |
+| YYYY-MM-DD | `2024-03-10` | 具体日期 |
+
+### 评论回复 API
+
+发布评论/回复使用 `emotion_cgi_re_feeds` 接口：
+
+**URL**: `http://taotao.qq.com/cgi-bin/emotion_cgi_re_feeds`
+
+**参数**：
+
+| 参数 | 说明 |
+|------|------|
+| `uin` | 当前登录用户 QQ |
+| `tid` | 帖子 TID（`t1_tid`） |
+| `t1_uin` | 帖子主人 QQ |
+| `t1_tid` | 帖子 TID |
+| `t2_uin` | 被回复者 QQ（回复评论时） |
+| `t2_tid` | 被回复评论序号（回复评论时） |
+| `content` | 评论内容 |
+| `g_tk` | 安全令牌 |
+
+**示例**：
+
+```typescript
+// 回复一级评论
+const params = {
+  uin: myUin,
+  tid: postTid,
+  t1_uin: postOwnerUin,
+  t1_tid: postTid,
+  t2_uin: commentAuthorUin,  // 被回复者
+  t2_tid: commentTid,        // 被回复评论序号
+  content: replyContent,
+  g_tk: gTk
+};
+
+// 发布一级评论（无 t2_* 参数）
+const rootParams = {
+  uin: myUin,
+  tid: postTid,
+  t1_uin: postOwnerUin,
+  t1_tid: postTid,
+  content: commentContent,
+  g_tk: gTk
+};
+```
