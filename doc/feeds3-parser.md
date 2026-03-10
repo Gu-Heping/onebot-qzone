@@ -421,43 +421,74 @@ interface Feeds3Comment {
 
 发布评论/回复使用 `emotion_cgi_re_feeds` 接口：
 
-**URL**: `http://taotao.qq.com/cgi-bin/emotion_cgi_re_feeds`
+**URL**: `https://h5.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_re_feeds`
 
 **参数**：
 
 | 参数 | 说明 |
 |------|------|
+| `topicId` | 格式为 `{ouin}_{tid}__1` |
+| `hostUin` | 帖子主人 QQ |
 | `uin` | 当前登录用户 QQ |
-| `tid` | 帖子 TID（`t1_tid`） |
-| `t1_uin` | 帖子主人 QQ |
-| `t1_tid` | 帖子 TID |
+| `content` | 评论内容 |
+| `paramstr` | `1`=一级评论，`2`=回复评论 |
+| `commentId` | 被回复评论 ID（h5 抓包参数） |
+| `commentUin` | 被回复者 QQ（h5 抓包参数） |
+| `t1_uin` | 帖子主人 QQ（feeds3 参数） |
+| `t1_tid` | 帖子 TID（feeds3 参数） |
 | `t2_uin` | 被回复者 QQ（回复评论时） |
 | `t2_tid` | 被回复评论序号（回复评论时） |
-| `content` | 评论内容 |
 | `g_tk` | 安全令牌 |
+
+**重要说明**：
+
+feeds3 解析出的 `commentid` 来自 HTML 的 `data-tid` 属性，是**帖子内的评论序号**（从 1 递增），而非后端数据库的真实评论 ID。
+
+回复评论时，桥接会同时传递：
+1. `commentId` / `commentUin`（h5 抓包参数）
+2. `t1_uin` / `t1_tid` / `t2_uin` / `t2_tid`（feeds3 文档参数）
+
+服务端可能根据 `t2_tid`（序号）匹配评论，也可能需要真实的后端评论 ID。如果回复失败（如「评论已被删除」），可能是因为：
+
+1. 评论确实已被删除
+2. API 需要真实评论 ID 而非序号（此时需通过 PC/mobile 评论 API 获取带真实 ID 的评论列表）
 
 **示例**：
 
 ```typescript
 // 回复一级评论
 const params = {
+  topicId: `${postOwnerUin}_${postTid}__1`,
+  hostUin: postOwnerUin,
   uin: myUin,
-  tid: postTid,
+  content: replyContent,
+  paramstr: '2',
+  commentId: commentTid,        // feeds3 的 data-tid（序号）
+  commentUin: commentAuthorUin,
   t1_uin: postOwnerUin,
   t1_tid: postTid,
-  t2_uin: commentAuthorUin,  // 被回复者
-  t2_tid: commentTid,        // 被回复评论序号
-  content: replyContent,
+  t2_uin: commentAuthorUin,     // 被回复者
+  t2_tid: commentTid,           // 被回复评论序号
   g_tk: gTk
 };
 
-// 发布一级评论（无 t2_* 参数）
+// 发布一级评论
 const rootParams = {
+  topicId: `${postOwnerUin}_${postTid}__1`,
+  hostUin: postOwnerUin,
   uin: myUin,
-  tid: postTid,
-  t1_uin: postOwnerUin,
-  t1_tid: postTid,
   content: commentContent,
+  paramstr: '1',
   g_tk: gTk
 };
 ```
+
+### 评论回复的限制与兜底策略
+
+当评论来源于 feeds3 HTML 解析时，`commentid` 为帖子内序号，回复可能失败。桥接的兜底策略：
+
+1. **优先使用 PC/mobile 评论 API**：`getCommentsBestEffort` 会先尝试 PC 和 mobile 的评论接口，这些接口返回的 `commentid` 是真实 ID。
+2. **feeds3 兜底**：当 PC/mobile 都失败时，才使用 feeds3 解析的评论。
+3. **回复失败处理**：如果 feeds3 评论回复失败，建议：
+   - 在 QQ 空间网页端手动确认评论是否存在
+   - 尝试通过 `getCommentsBestEffort` 重新获取评论列表（可能获得真实 ID）

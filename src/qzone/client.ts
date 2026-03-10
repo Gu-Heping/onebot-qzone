@@ -1679,24 +1679,16 @@ export class QzoneClient {
         lastPayload = payload;
       } catch (exc) { log('DEBUG', `Detail POST failed: ${exc}`); }
 
-      // GET 变体
+      // GET 变体（简化版：只保留最有效的 2 个变体）
       const base = `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getdetailv6?g_tk=${this.getGtk()}&uin=${uin}&tid=${tid}&format=json`;
       const qzonetoken = await this.getQzonetoken() ?? String(this.getGtk());
       const variants = [
-        '',
-        `qzonetoken=${qzonetoken}`,
-        `qzonetoken=${qzonetoken}&qzreferrer=${this.getQzreferrer()}`,
-        `qzonetoken=${qzonetoken}&hostuin=${this.qqNumber}`,
-        `qzonetoken=${qzonetoken}&hostuin=${this.qqNumber}&qzreferrer=${this.getQzreferrer()}`,
+        `qzonetoken=${qzonetoken}&hostuin=${this.qqNumber}&qzreferrer=${this.getQzreferrer()}`,  // 完整参数
+        `qzonetoken=${qzonetoken}`,  // 仅 qzonetoken
       ];
-      const order = [...Array(variants.length).keys()];
-      if (this.detailWinningVariant !== null && this.detailWinningVariant >= 0) {
-        const idx = order.indexOf(this.detailWinningVariant);
-        if (idx !== -1) { order.splice(idx, 1); order.unshift(this.detailWinningVariant); }
-      }
-      for (const index of order) {
+      for (let index = 0; index < variants.length; index++) {
         const suffix = variants[index]!;
-        const url = base + (suffix ? '&' + suffix : '');
+        const url = base + '&' + suffix;
         try {
           const resp = await this.get(url, { headers: this.pcHeaders(this.getQzreferrer()) });
           this.dumpDebugPayload(`detail_pc_${index}`, resp.text);
@@ -1797,37 +1789,25 @@ export class QzoneClient {
       }
     } catch (exc) { log('DEBUG', `Comments POST failed: ${exc}`); }
 
-    // GET 变体
+    // GET 变体（简化版：只保留最有效的 3 个变体）
     const base = `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getcmtreply_v6?g_tk=${this.getGtk()}&uin=${uin}&tid=${tid}&num=${num}&pos=${pos}&format=json`;
     const qzonetoken = await this.getQzonetoken();
     const extras: string[] = [];
     if (t1Source !== undefined) extras.push(`t1_source=${t1Source}`);
     if (t1Uin) extras.push(`t1_uin=${t1Uin}`);
     if (t1Tid) extras.push(`t1_tid=${t1Tid}`);
-    const tokenCands = qzonetoken ? [qzonetoken] : [String(this.getGtk())];
+    
+    // 简化：只保留最有效的 3 个 GET 变体
     const variants: string[] = [
-      extras.join('&'), 't1_source=0',
-      `hostuin=${this.qqNumber}`, `qzreferrer=${this.getQzreferrer()}`,
-      `hostuin=${this.qqNumber}&qzreferrer=${this.getQzreferrer()}`,
-      ...tokenCands.flatMap(t => [
-        `qzonetoken=${t}`,
-        `qzonetoken=${t}&qzreferrer=${this.getQzreferrer()}`,
-        `qzonetoken=${t}&hostuin=${this.qqNumber}`,
-        `qzonetoken=${t}&hostuin=${this.qqNumber}&qzreferrer=${this.getQzreferrer()}`,
-      ]),
-      '',
-    ];
-
-    const order = [...Array(variants.length).keys()];
-    if (this.commentsWinningVariant !== null && this.commentsWinningVariant >= 0) {
-      const idx = order.indexOf(this.commentsWinningVariant);
-      if (idx !== -1) { order.splice(idx, 1); order.unshift(this.commentsWinningVariant); }
-    }
+      extras.join('&'),                                    // 带 t1_source/t1_uin/t1_tid
+      `hostuin=${this.qqNumber}&qzreferrer=${this.getQzreferrer()}`,  // 完整认证参数
+      qzonetoken ? `qzonetoken=${qzonetoken}` : '',        // qzonetoken
+    ].filter(v => v);
 
     let lastPayload: ApiResponse = {};
-    for (const index of order) {
+    for (let index = 0; index < variants.length; index++) {
       const suffix = variants[index]!;
-      const url = base + (suffix ? '&' + suffix : '');
+      const url = base + '&' + suffix;
       try {
         const resp = await this.get(url, { headers: this.pcHeaders(this.getQzreferrer()) });
         this.dumpDebugPayload(`comments_pc_${index}`, resp.text);
@@ -2320,13 +2300,20 @@ export class QzoneClient {
       qzreferrer: this.getQzreferrer(),
     };
     
-    // 回复评论时添加 commentId 和 commentUin
+    // 回复评论时：同时传 commentId/commentUin（h5 抓包）与 t1_*/t2_*（feeds3 文档）
+    // - t1_uin/t1_tid：帖子主人和帖子 TID
+    // - t2_uin/t2_tid：被回复者 QQ 和被回复评论序号（feeds3 的 data-tid，即帖子内序号）
     if (replyCommentId && replyUin) {
       data['commentId'] = replyCommentId;
       data['commentUin'] = replyUin;
+      // feeds3 文档要求的参数
+      data['t1_uin'] = ouin;
+      data['t1_tid'] = tid;
+      data['t2_uin'] = replyUin;
+      data['t2_tid'] = replyCommentId;  // feeds3 的 data-tid（序号）
     }
     
-    log('DEBUG', `commentEmotion: topicId=${data.topicId} paramstr=${data.paramstr} commentId=${replyCommentId ?? 'none'} commentUin=${replyUin ?? 'none'} content=${finalContent.substring(0, 50)}...`);
+    log('DEBUG', `commentEmotion: topicId=${data.topicId} paramstr=${data.paramstr} commentId=${replyCommentId ?? 'none'} commentUin=${replyUin ?? 'none'} t1_uin=${ouin} t1_tid=${tid} t2_uin=${replyUin ?? 'none'} t2_tid=${replyCommentId ?? 'none'} content=${finalContent.substring(0, 50)}...`);
     
     const resp = await this.post(url, {
       data: new URLSearchParams(data),
@@ -2424,11 +2411,11 @@ export class QzoneClient {
         const data = parsed.data as { items?: Array<{ uin?: string; nickname?: string; figureurl?: string }>; total?: number } | undefined;
         const items = data?.items ?? (parsed as { items?: unknown[] }).items;
         if (Array.isArray(items) && items.length > 0) {
-          const list = items.map((f: Record<string, unknown>) => ({
-            uin: String(f.uin ?? f.fuin ?? ''),
-            nickname: String(f.nickname ?? f.name ?? f.remark ?? ''),
-            avatar: String(f.figureurl ?? f.logimg ?? f.avatar ?? ''),
-          })).filter((f: { uin: string }) => f.uin && f.uin !== selfUin);
+          const list = (items as Array<Record<string, unknown>>).map((f) => ({
+            uin: String(f['uin'] ?? f['fuin'] ?? ''),
+            nickname: String(f['nickname'] ?? f['name'] ?? f['remark'] ?? ''),
+            avatar: String(f['figureurl'] ?? f['logimg'] ?? f['avatar'] ?? ''),
+          })).filter((f) => f.uin && f.uin !== selfUin);
           if (list.length) {
             this.mergeFriendCache(list);
             return {
@@ -2529,11 +2516,12 @@ export class QzoneClient {
       await page.waitForTimeout(5000);
       const list = await page.$$eval(
         '[class*="friend"] a[href*="qzone.qq.com"]',
-        (links: Element[]) => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (links: any[]) => {
           const seen = new Set<string>();
           const result: Array<{ uin: string; nickname: string; avatar: string }> = [];
           for (const a of links) {
-            const href = (a as HTMLAnchorElement).href || '';
+            const href = a.href || '';
             const match = href.match(/qzone\.qq\.com\/(\d+)/);
             if (!match) continue;
             const uin = match[1];
@@ -2541,14 +2529,14 @@ export class QzoneClient {
             seen.add(uin);
             const nickname = (a.textContent || '').trim();
             const img = a.querySelector('img');
-            const avatar = img ? (img as HTMLImageElement).src || '' : '';
+            const avatar = img ? img.src || '' : '';
             result.push({ uin, nickname, avatar });
           }
           return result;
         },
       );
       await ctx.close();
-      await browser.close();
+      if (browser) await browser.close();
       browser = null;
       if (list.length) {
         log('INFO', `Playwright friend list: ${list.length} friends`);

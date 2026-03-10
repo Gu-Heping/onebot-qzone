@@ -4,13 +4,43 @@
 
 ```
 说说列表:  emotion_cgi_msglist_v6 → feeds3_html_more (HTML 解析)
-说说详情:  POST getdetailv6 → GET getdetailv6 (5变体) → mobile detail → emotion_list (feeds3)
-评论获取:  POST getcmtreply_v6 → GET getcmtreply_v6 (10+变体) → mobile get_comment_list
+说说详情:  POST getdetailv6 → GET getdetailv6 (2变体) → mobile detail → emotion_list (feeds3)
+评论获取:  POST getcmtreply_v6 → GET getcmtreply_v6 (3变体) → mobile get_comment_list → feeds3 HTML 解析
+评论回复:  emotion_cgi_re_feeds (h5 接口，同时传 commentId/commentUin + t1_*/t2_* 参数)
 图片提取:  detail API → feeds3 HTML <img> 标签提取
 取消点赞:  internal_dolike_app → like_cgi_likev6 (optype=1) → mobile like (active=1)
 转发说说:  emotion_cgi_forward_v6 → emotion_cgi_re_feeds (forward=1)
 相册列表:  cgi_list_album → cgi_list_photo
 ```
+
+## 评论回复的特殊说明
+
+评论回复使用 `emotion_cgi_re_feeds` 接口（h5.qzone.qq.com 域），需要特别注意：
+
+### 参数传递
+
+回复评论时，桥接同时传递两组参数：
+
+| 参数组 | 参数名 | 说明 |
+|--------|--------|------|
+| h5 抓包参数 | `commentId`, `commentUin` | 来自浏览器开发者工具抓包 |
+| feeds3 文档参数 | `t1_uin`, `t1_tid`, `t2_uin`, `t2_tid` | 来自 feeds3 HTML 的 data-param |
+
+### 评论 ID 来源问题
+
+feeds3 HTML 解析出的 `commentid` 是 `data-tid` 属性值，即**帖子内的评论序号**（从 1 递增），而非后端数据库的真实评论 ID。
+
+| 评论来源 | commentid 含义 | 回复可靠性 |
+|----------|---------------|-----------|
+| PC API (`getcmtreply_v6`) | 真实评论 ID | ✅ 可靠 |
+| Mobile API (`get_comment_list`) | 真实评论 ID | ✅ 可靠 |
+| feeds3 HTML 解析 | 帖子内序号 | ⚠️ 可能失败 |
+
+### 推荐策略
+
+1. **优先使用 PC/mobile 评论 API**：`getCommentsBestEffort` 会先尝试这两个接口
+2. **feeds3 作为兜底**：当 PC/mobile 都被限流时才使用
+3. **回复失败时**：如果 feeds3 评论回复返回「已被删除」等错误，建议重新调用 `getCommentsBestEffort` 尝试获取带真实 ID 的评论列表
 
 ## 各接口的降级细节
 
@@ -31,7 +61,9 @@
 共 4 级降级：
 
 1. **POST getdetailv6**: 最优先，POST 请求成功率最高
-2. **GET getdetailv6 (5 个参数变体)**: 遍历不同 qzonetoken/hostuin/qzreferrer 组合
+2. **GET getdetailv6 (2 个参数变体)**:
+   - 变体 0: 完整参数（qzonetoken + hostuin + qzreferrer）
+   - 变体 1: 仅 qzonetoken
    - 记忆上次成功变体（winning variant），下次优先尝试
    - 全部失败后设 5 分钟冷却期
 3. **mobile detail**: 移动端 API fallback
@@ -42,12 +74,15 @@
 共 3 级降级：
 
 1. **POST getcmtreply_v6**: POST 优先
-2. **GET getcmtreply_v6 (10+ 个参数变体)**: 排列组合 t1_source, hostuin, qzreferrer, qzonetoken
+2. **GET getcmtreply_v6 (3 个参数变体)**:
+   - 变体 0: 带 t1_source/t1_uin/t1_tid（如果提供）
+   - 变体 1: 完整认证参数（hostuin + qzreferrer）
+   - 变体 2: 仅 qzonetoken
    - 同样有 winning variant 记忆机制
    - 全部失败后 5 分钟冷却
 3. **mobile get_comment_list**: 移动端 fallback
 
-`getCommentsBestEffort` 还在此基础上增加了 `t1_source` 参数变化的额外层次。
+`getCommentsBestEffort` 还在此基础上增加了 `t1_source` 参数变化的额外层次，并在最后有 feeds3 HTML 解析兜底。
 
 ### 取消点赞
 
