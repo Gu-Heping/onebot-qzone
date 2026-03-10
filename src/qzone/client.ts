@@ -1880,7 +1880,33 @@ export class QzoneClient {
     } catch (e) { log('DEBUG', `getCommentsBestEffort mobile 异常: ${e}`); }
 
     // 兜底：使用 feeds3 拉取说说时已解析出的评论（仅覆盖最近通过 getEmotionList/getFriendFeeds 拉过的说说）
-    const feeds3List = this.feeds3Comments.get(tid);
+    let feeds3List = this.feeds3Comments.get(tid);
+    
+    // 如果缓存中没有该 tid 的评论，主动拉取 feeds3 HTML 来解析
+    if (!feeds3List || feeds3List.length === 0) {
+      log('INFO', `getCommentsBestEffort: feeds3Comments 缓存未命中，主动拉取 uin=${uin} tid=${tid}`);
+      try {
+        const htmlText = await this.fetchFeeds3Html(uin, true, 1, 50);
+        const comments = _parseFeeds3Comments(htmlText);
+        // 合并到缓存
+        for (const [postTid, cmts] of comments) {
+          const existing = this.feeds3Comments.get(postTid);
+          if (existing) {
+            const seenIds = new Set(existing.map(c => String(c['commentid'])));
+            for (const c of cmts) {
+              if (!seenIds.has(String(c['commentid']))) existing.push(c);
+            }
+          } else {
+            this.feeds3Comments.set(postTid, cmts);
+          }
+        }
+        feeds3List = this.feeds3Comments.get(tid);
+        log('DEBUG', `getCommentsBestEffort: 主动拉取后 feeds3 解析到 ${feeds3List?.length ?? 0} 条评论`);
+      } catch (e) {
+        log('WARNING', `getCommentsBestEffort: 主动拉取 feeds3 失败: ${e}`);
+      }
+    }
+    
     if (feeds3List && feeds3List.length > 0) {
       const slice = feeds3List.slice(pos, pos + num);
       log('INFO', `getCommentsBestEffort: 使用 feeds3 兜底 评论数=${slice.length}/${feeds3List.length}`);
