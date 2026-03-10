@@ -448,7 +448,7 @@ export class QzoneClient {
   }
 
   private getQzreferrer(): string {
-    return `https://user.qzone.qq.com/${this.qqNumber}`;
+    return `https://user.qzone.qq.com/${this.qqNumber}/main`;
   }
 
   isAuthFailure(payload: ApiResponse): boolean {
@@ -2275,63 +2275,56 @@ export class QzoneClient {
     }
     if (!appid) appid = 311;
 
-    const shareUrl = `https://sns.qzone.qq.com/cgi-bin/qzshare/cgi_qzshareaddcomment?&g_tk=${this.getGtk()}`;
-
-    // 回复评论：优先 sns cgi_qzshareaddcomment（抓包：paramstr=2, commentId, commentUin）
+    // 统一使用 h5.qzone.qq.com 域名的 emotion_cgi_re_feeds 接口
+    // 抓包验证：topicId 格式为 {ouin}_{tid}__1，paramstr=2 表示回复评论
+    const url = `https://h5.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_re_feeds?g_tk=${this.getGtk()}`;
+    
+    // 回复评论时，需要在 content 前添加 @提及 格式：@{uin:xxx,nick:xxx,auto:1}
+    let finalContent = content;
     if (replyCommentId && replyUin) {
-      try {
-        const topicId = appid === 311 ? `${ouin}_${tid}` : `${ouin}_${abstime}`;
-        const shareData: Record<string, string> = {
-          topicId,
-          feedsType: '100',
-          inCharset: 'utf-8',
-          outCharset: 'utf-8',
-          plat: 'qzone',
-          source: 'ic',
-          hostUin: ouin,
-          isSignIn: '',
-          platformid: '50',
-          uin: this.qqNumber!,
-          format: 'fs',
-          ref: 'feeds',
-          content,
-          commentId: replyCommentId,
-          commentUin: replyUin,
-          richval: '',
-          richtype: '',
-          private: '0',
-          paramstr: '2',
-          qzreferrer: this.getQzreferrer(),
-        };
-        const shareResp = await this.post(shareUrl, { data: new URLSearchParams(shareData), headers: this.pcHeaders(this.getQzreferrer()) });
-        const shareResult = parseJsonp(shareResp.text) as ApiResponse;
-        if ((shareResult['code'] as number) === 0) return shareResult;
-      } catch { /* fall through to emotion_cgi_re_feeds */ }
+      // 获取被回复者的昵称（优先从好友缓存，否则用 UIN）
+      const friendInfo = this.friendCache.get(replyUin);
+      const nick = friendInfo?.nickname || replyUin;
+      // 如果 content 没有以 @{ 开头，自动添加 @提及 前缀
+      if (!content.startsWith('@{')) {
+        finalContent = `@{uin:${replyUin},nick:${nick},auto:1} ${content}`;
+      }
     }
-
-    // app 分享（appid != 311）非回复时优先 sns，topicId = {hostUin}_{abstime}
-    if (appid !== 311 && abstime && !replyCommentId) {
-      try {
-        const shareData: Record<string, string> = {
-          topicId: `${ouin}_${abstime}`, feedsType: '100', inCharset: 'utf-8', outCharset: 'utf-8',
-          plat: 'qzone', source: 'ic', hostUin: ouin, isSignIn: '', platformid: '50',
-          uin: this.qqNumber!, format: 'fs', ref: 'feeds', content, richval: '', richtype: '', private: '0',
-          paramstr: '1', qzreferrer: this.getQzreferrer(),
-        };
-        const shareResp = await this.post(shareUrl, { data: new URLSearchParams(shareData), headers: this.pcHeaders(this.getQzreferrer()) });
-        const shareResult = parseJsonp(shareResp.text) as ApiResponse;
-        if ((shareResult['code'] as number) === 0) return shareResult;
-      } catch { /* fall through */ }
-    }
-
-    // 普通说说 / 回退：emotion_cgi_re_feeds，topicId = {ouin}_{tid}
+    
+    // 构建完整的请求参数（与浏览器抓包一致）
     const data: Record<string, string> = {
-      hostUin: ouin, topicId: `${ouin}_${tid}`, content, format: 'json', qzreferrer: this.getQzreferrer(),
-      appid: String(appid),
+      topicId: `${ouin}_${tid}__1`,
+      feedsType: '100',
+      inCharset: 'utf-8',
+      outCharset: 'utf-8',
+      plat: 'qzone',
+      source: 'ic',
+      hostUin: ouin,
+      isSignIn: '',
+      platformid: '50',
+      uin: this.qqNumber!,
+      format: 'fs',
+      ref: 'feeds',
+      content: finalContent,
+      richval: '',
+      richtype: '',
+      private: '0',
+      paramstr: replyCommentId && replyUin ? '2' : '1',
+      qzreferrer: this.getQzreferrer(),
     };
-    if (replyCommentId && replyUin) { data['commentId'] = replyCommentId; data['replyUin'] = replyUin; }
-    const url = `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_re_feeds?g_tk=${this.getGtk()}`;
-    const resp = await this.post(url, { data: new URLSearchParams(data) });
+    
+    // 回复评论时添加 commentId 和 commentUin
+    if (replyCommentId && replyUin) {
+      data['commentId'] = replyCommentId;
+      data['commentUin'] = replyUin;
+    }
+    
+    log('DEBUG', `commentEmotion: topicId=${data.topicId} paramstr=${data.paramstr} commentId=${replyCommentId ?? 'none'} commentUin=${replyUin ?? 'none'} content=${finalContent.substring(0, 50)}...`);
+    
+    const resp = await this.post(url, {
+      data: new URLSearchParams(data),
+      headers: this.pcHeaders(this.getQzreferrer())
+    });
     return parseJsonp(resp.text) as ApiResponse;
   }
 
