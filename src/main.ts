@@ -103,28 +103,34 @@ async function main(): Promise<void> {
 
   // ── 启动状态面板 ──
   if (client.loggedIn) {
-    // 快速读写探测
+    // 快速读写探测（写探测会发一条说说再删，默认关闭以免刷屏；需时设 QZONE_STARTUP_WRITE_PROBE=1）
     let readOk = false, writeOk = false;
     try {
       const r = await client.getEmotionList(client.qqNumber!, 0, 1) as Record<string, unknown>;
       readOk = r?.code === 0 && Array.isArray(r?.msglist) && (r.msglist as unknown[]).length > 0;
     } catch { /* ignore */ }
 
-    try {
-      const pubRes: unknown = await client.publish(`[bridge-healthcheck] ${new Date().toISOString()}`);
-      let tid: string | undefined;
-      if (Array.isArray(pubRes)) tid = pubRes[0] as string;
-      else if (pubRes && typeof pubRes === 'object') tid = (pubRes as Record<string, unknown>)?.tid as string;
-      if (tid) {
-        writeOk = true;
-        try { await client.deleteEmotion(tid); } catch { /* cleanup failure ok */ }
-      }
-    } catch { /* ignore */ }
+    const enableWriteProbe = process.env['QZONE_STARTUP_WRITE_PROBE'] === '1' || process.env['QZONE_STARTUP_WRITE_PROBE'] === 'true';
+    if (enableWriteProbe) {
+      try {
+        const pubRes: unknown = await client.publish(`[bridge-healthcheck] ${new Date().toISOString()}`);
+        let tid: string | undefined;
+        if (Array.isArray(pubRes)) tid = pubRes[0] as string;
+        else if (pubRes && typeof pubRes === 'object') tid = (pubRes as Record<string, unknown>)?.tid as string;
+        if (tid) {
+          writeOk = true;
+          try { await client.deleteEmotion(tid); } catch { /* cleanup failure ok */ }
+        }
+      } catch { /* ignore */ }
+    }
 
     const cookieKeys = Object.keys(client.cookies).length;
     const hasPskey = !!client.cookies['p_skey'];
     const hasSkey = !!client.cookies['skey'];
     const hasSuperkey = !!client.cookies['superkey'];
+    const writeProbeLabel = enableWriteProbe
+      ? (writeOk ? G + '✓ 成功' + W : R + '✗ 失败' + W)
+      : (Y + '已跳过 (QZONE_STARTUP_WRITE_PROBE≠1)' + W);
 
     printBanner([
       `${C}QZone Bridge v2.0${W}  启动状态面板`,
@@ -134,7 +140,7 @@ async function main(): Promise<void> {
       `Cookie 数:   ${cookieKeys} 个  p_skey=${hasPskey ? G + '✓' + W : R + '✗' + W}  skey=${hasSkey ? G + '✓' + W : R + '✗' + W}  superkey=${hasSuperkey ? G + '✓' + W : R + '✗' + W}`,
       ``,
       `读操作测试:  ${readOk ? G + '✓ 成功' + W : R + '✗ 失败' + W}  (getEmotionList)`,
-      `写操作测试:  ${writeOk ? G + '✓ 成功' + W : R + '✗ 失败' + W}  (publish + delete)`,
+      `写操作测试:  ${writeProbeLabel}  (publish+delete，默认关闭)`,
       ``,
       `自动续期:    ${G}已启用${W}  每 4 小时静默刷新（headless，无需扫码）`,
       `.env 同步:   ${G}已启用${W}  续期后自动更新 QZONE_COOKIE`,
