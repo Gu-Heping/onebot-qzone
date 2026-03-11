@@ -66,6 +66,40 @@ export const USER_AGENTS = {
     '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
 } as const;
 
+/** 随机化 User-Agent 池（用于请求指纹随机化） */
+export const USER_AGENT_POOL = [
+  // Chrome Windows
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
+  // Chrome macOS
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
+  // Edge Windows
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Edg/131.0.0.0',
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36 Edg/130.0.0.0',
+] as const;
+
+/** 随机化 Accept-Language 池 */
+export const ACCEPT_LANGUAGE_POOL = [
+  'zh-CN,zh;q=0.9,en;q=0.8',
+  'zh-CN,zh;q=0.9,en-US;q=0.8,en;q=0.7',
+  'zh-CN,zh-TW;q=0.9,zh;q=0.8,en;q=0.7',
+  'zh;q=0.9,en;q=0.8',
+  'en-US,en;q=0.9,zh-CN;q=0.8',
+] as const;
+
+/** 获取随机 User-Agent */
+export function getRandomUserAgent(): string {
+  return USER_AGENT_POOL[Math.floor(Math.random() * USER_AGENT_POOL.length)]!;
+}
+
+/** 获取随机 Accept-Language */
+export function getRandomAcceptLanguage(): string {
+  return ACCEPT_LANGUAGE_POOL[Math.floor(Math.random() * ACCEPT_LANGUAGE_POOL.length)]!;
+}
+
 // ── API 域名 / 路径模板 ─────────────────────────
 
 export const QZONE_DOMAINS = {

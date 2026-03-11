@@ -20,7 +20,10 @@ import type { ApiResponse, NormalizedItem, PostMeta, UploadImageResult, Routes }
 import { parseRawResponse, isGenuineSuccess, type ParsedApiResult } from './requestLayer.js';
 import { validateApiResponse } from './validate.js';
 import type { SchemaName } from './schemas.js';
-import { CACHE_TTL, AUTH_FAILURE_CODES, USER_AGENTS } from './config/constants.js';
+import {
+  CACHE_TTL, AUTH_FAILURE_CODES, USER_AGENTS,
+  getRandomUserAgent, getRandomAcceptLanguage,
+} from './config/constants.js';
 import { env } from './config/env.js';
 import {
   parseFeeds3Items as _parseFeeds3Items,
@@ -410,15 +413,30 @@ export class QzoneClient {
   private static UA = USER_AGENTS.desktop;
   private static SEC_CH_UA = USER_AGENTS.secChUa;
 
+  /** 请求指纹随机化：随机选择 User-Agent */
+  private getRandomizedUserAgent(): string {
+    return getRandomUserAgent();
+  }
+
+  /** 请求指纹随机化：随机选择 Accept-Language */
+  private getRandomizedAcceptLanguage(): string {
+    return getRandomAcceptLanguage();
+  }
+
   private pcHeaders(referrer?: string, origin?: string): Record<string, string> {
     const h: Record<string, string> = {
-      'User-Agent': QzoneClient.UA,
+      'User-Agent': this.getRandomizedUserAgent(),
       'Referer': referrer ?? 'https://qzs.qzone.qq.com/',
-      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-      'Accept-Language': 'zh-CN,zh;q=0.9',
+      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+      'Accept-Language': this.getRandomizedAcceptLanguage(),
+      'Accept-Encoding': 'gzip, deflate, br',
       'Sec-Ch-Ua': QzoneClient.SEC_CH_UA,
       'Sec-Ch-Ua-Mobile': '?0',
       'Sec-Ch-Ua-Platform': '"Windows"',
+      'Sec-Fetch-Dest': 'document',
+      'Sec-Fetch-Mode': 'navigate',
+      'Sec-Fetch-Site': 'same-site',
+      'Cache-Control': 'max-age=0',
     };
     if (origin) h['Origin'] = origin;
     return h;
@@ -428,6 +446,10 @@ export class QzoneClient {
     const h: Record<string, string> = {
       'User-Agent': USER_AGENTS.mobile,
       'Referer': 'https://mobile.qzone.qq.com',
+      'Accept': 'application/json, text/plain, */*',
+      'Accept-Language': this.getRandomizedAcceptLanguage(),
+      'Accept-Encoding': 'gzip, deflate, br',
+      'X-Requested-With': 'XMLHttpRequest',
     };
     if (origin) h['Origin'] = origin;
     return h;
