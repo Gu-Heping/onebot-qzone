@@ -1974,6 +1974,110 @@ export class QzoneClient {
   }
 
   // ──────────────────────────────────────────────
+  // Like list (best effort with fallback chain)
+  // ──────────────────────────────────────────────
+
+  private feeds3LikesCache = new Map<string, Array<Record<string, unknown>>>();
+
+  /**
+   * 获取点赞列表（多级降级）。
+   * 降级链：PC detail → mobile detail → feeds3 HTML → 空数组
+   */
+  async getLikeListBestEffort(uin: string, tid: string): Promise<Array<Record<string, unknown>>> {
+    log('DEBUG', `getLikeListBestEffort: uin=${uin} tid=${tid}`);
+
+    // 辅助函数：从响应提取点赞列表
+    const extractLikes = (data: ApiResponse): Array<Record<string, unknown>> | null => {
+      if (!data || data['_empty']) return null;
+      for (const key of ['like', 'likes', 'likeList', 'likelist']) {
+        if (Array.isArray(data[key])) return data[key] as Array<Record<string, unknown>>;
+      }
+      const dataObj = data['data'] && typeof data['data'] === 'object' ? data['data'] as Record<string, unknown> : {};
+      for (const key of ['like', 'likes', 'likeList', 'likelist']) {
+        if (Array.isArray(dataObj[key])) return dataObj[key] as Array<Record<string, unknown>>;
+      }
+      return null;
+    };
+
+    // 1. 尝试 PC detail
+    try {
+      const detail = await this.getShuoshuoDetail(uin, tid);
+      const likes = extractLikes(detail);
+      if (likes && likes.length > 0) {
+        log('INFO', `getLikeListBestEffort: PC detail 成功 ${likes.length} 个点赞`);
+        return likes;
+      }
+      log('DEBUG', `getLikeListBestEffort: PC detail 无点赞数据`);
+    } catch (e) {
+      log('DEBUG', `getLikeListBestEffort PC detail 异常: ${e}`);
+    }
+
+    // 2. 尝试 mobile detail
+    try {
+      const savedRoute = this.routes['detail'];
+      this.routes['detail'] = 'mobile';
+      const detail = await this.getShuoshuoDetail(uin, tid);
+      this.routes['detail'] = savedRoute;
+      const likes = extractLikes(detail);
+      if (likes && likes.length > 0) {
+        log('INFO', `getLikeListBestEffort: mobile detail 成功 ${likes.length} 个点赞`);
+        return likes;
+      }
+      log('DEBUG', `getLikeListBestEffort: mobile detail 无点赞数据`);
+    } catch (e) {
+      log('DEBUG', `getLikeListBestEffort mobile detail 异常: ${e}`);
+    }
+
+    // 3. 尝试 feeds3 兜底
+    const cached = this.feeds3LikesCache.get(tid);
+    if (cached) {
+      log('INFO', `getLikeListBestEffort: 使用 feeds3 缓存 ${cached.length} 个点赞`);
+      return cached;
+    }
+
+    // 主动拉取 feeds3 解析点赞
+    try {
+      log('INFO', `getLikeListBestEffort: feeds3 缓存未命中，主动拉取 uin=${uin} tid=${tid}`);
+      let htmlText = await this.fetchFeeds3Html(uin, true, 1, 50);
+      let likesMap = _parseFeeds3Likes(htmlText);
+      let likes = likesMap.get(tid) ?? [];
+
+      if (likes.length === 0 && uin !== this.qqNumber) {
+        log('DEBUG', `getLikeListBestEffort: scope=1 未找到，尝试 scope=0`);
+        const htmlText2 = await this.fetchFeeds3Html(this.qqNumber!, false, 0, 50, '', undefined, 'all', 'all');
+        const likesMap2 = _parseFeeds3Likes(htmlText2);
+        const likes2 = likesMap2.get(tid) ?? [];
+        if (likes2.length > 0) {
+          likes = likes2;
+          likesMap = likesMap2;
+        }
+      }
+
+      // 缓存所有解析到的点赞数据
+      for (const [postTid, postLikes] of likesMap) {
+        this.feeds3LikesCache.set(postTid, postLikes.map(l => ({
+          uin: l.uin,
+          name: l.nickname,
+          time: l.abstime,
+          customItemId: l.customItemId,
+          _source: 'feeds3_html',
+        })));
+      }
+
+      if (likes.length > 0) {
+        log('INFO', `getLikeListBestEffort: feeds3 解析成功 ${likes.length} 个点赞`);
+        return this.feeds3LikesCache.get(tid) ?? [];
+      }
+      log('DEBUG', `getLikeListBestEffort: feeds3 无点赞数据`);
+    } catch (e) {
+      log('WARNING', `getLikeListBestEffort: feeds3 解析失败: ${e}`);
+    }
+
+    log('WARNING', `getLikeListBestEffort: 全部失败，返回空数组`);
+    return [];
+  }
+
+  // ──────────────────────────────────────────────
   // Image upload
   // ──────────────────────────────────────────────
   async uploadImage(imageBase64: string, albumId?: string): Promise<UploadImageResult> {

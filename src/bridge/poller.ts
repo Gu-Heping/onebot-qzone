@@ -358,6 +358,7 @@ export class EventPoller {
   private seenPostTids = new Set<string>();
   private seenCommentIds = new Map<string, Set<string>>();  // tid → commentIds
   private seenLikeUins = new Map<string, Set<string>>();    // tid → uins
+  private pendingLikeUsers = new Map<string, Array<{ uin: string; nickname: string }>>(); // tid → 待匹配用户列表
   private trackTids: Set<string> = new Set();
   private knownCounts = new Map<string, { comment: number; like: number }>();  // tid → counts from qz_opcnt2
   private lastError = 0;
@@ -715,7 +716,8 @@ export class EventPoller {
   }
 
   private async pollLikes(selfUin: string, tid: string): Promise<void> {
-    const rawLikes = await this.client.getLikeList(selfUin, tid);
+    // 使用 bestEffort 获取点赞列表（带多级降级）
+    const rawLikes = await this.client.getLikeListBestEffort(selfUin, tid);
     if (rawLikes.length > 0) {
       for (const raw of rawLikes) {
         const like = normalizeLike(raw);
@@ -727,6 +729,11 @@ export class EventPoller {
           await this.hub.publish(event);
         }
       }
+      // 缓存点赞用户，用于计数兜底时匹配
+      this.pendingLikeUsers.set(tid, rawLikes.map(r => ({
+        uin: String(r['uin'] ?? r['fuin'] ?? ''),
+        nickname: String(r['name'] ?? r['nick'] ?? r['nickname'] ?? ''),
+      })).filter(u => u.uin));
     } else {
       await this.pollCountsDelta(selfUin, tid, 'like');
     }
@@ -750,22 +757,42 @@ export class EventPoller {
       if (delta > 0) {
         if (type === 'comment') {
           prev.comment = count;
+          // 尝试从缓存获取评论用户信息（如果有）
           for (let i = 0; i < delta; i++) {
             const event = buildCommentEvent(
-              { commentId: `opcnt_${Date.now()}_${i}`, uin: '', nickname: '', content: '', createdTime: now() },
+              { commentId: `opcnt_${Date.now()}_${i}`, uin: '', nickname: '', content: '[计数增加]', createdTime: now() },
               selfUin, tid, selfUin,
             );
             await this.hub.publish(event);
           }
         } else {
           prev.like = count;
+          // 尝试从 pendingLikeUsers 获取用户信息
+          const pendingUsers = this.pendingLikeUsers.get(tid) ?? [];
+          const seenUins = this.seenLikeUins.get(tid) ?? new Set();
+
           for (let i = 0; i < delta; i++) {
-            const event = buildLikeEvent(
-              { uin: '', nickname: '', createdTime: now() },
-              selfUin, tid, selfUin,
-            );
-            await this.hub.publish(event);
+            // 找一个未推送过的用户
+            const user = pendingUsers.find(u => u.uin && !seenUins.has(u.uin));
+            if (user) {
+              seenUins.add(user.uin);
+              const event = buildLikeEvent(
+                { uin: user.uin, nickname: user.nickname, createdTime: now() },
+                selfUin, tid, selfUin,
+              );
+              await this.hub.publish(event);
+            } else {
+              // 没有匹配的用户，发送空事件
+              const event = buildLikeEvent(
+                { uin: '', nickname: '', createdTime: now() },
+                selfUin, tid, selfUin,
+              );
+              await this.hub.publish(event);
+            }
           }
+
+          // 清理已使用的用户
+          this.pendingLikeUsers.set(tid, pendingUsers.filter(u => u.uin && !seenUins.has(u.uin)));
         }
       } else {
         if (type === 'comment') prev.comment = count;
@@ -786,6 +813,7 @@ export class EventPoller {
         this.trackTids.delete(tid);
         this.seenCommentIds.delete(tid);
         this.seenLikeUins.delete(tid);
+        this.pendingLikeUsers.delete(tid);
       }
     }
   }
