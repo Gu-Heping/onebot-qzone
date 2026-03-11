@@ -2312,7 +2312,7 @@ export class QzoneClient {
       data['t2_uin'] = replyUin;
       data['t2_tid'] = replyCommentId;  // feeds3 的 data-tid（序号）
     }
-    
+
     log('DEBUG', `commentEmotion: topicId=${data.topicId} paramstr=${data.paramstr} commentId=${replyCommentId ?? 'none'} commentUin=${replyUin ?? 'none'} t1_uin=${ouin} t1_tid=${tid} t2_uin=${replyUin ?? 'none'} t2_tid=${replyCommentId ?? 'none'} content=${finalContent.substring(0, 50)}...`);
     
     const resp = await this.post(url, {

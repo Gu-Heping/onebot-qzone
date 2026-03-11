@@ -24,6 +24,7 @@ export interface QzoneEmotion {
   uin: string;
   content: string;
   nickname?: string;
+  name?: string;
   createTime?: { time: number } | number | string;
   created_time?: number;
   cmtnum?: number;
@@ -37,6 +38,28 @@ export interface QzoneEmotion {
   video_cover?: string;
   video_width?: number;
   video_height?: number;
+  /** 视频详细元数据（从 h5-json 获取） */
+  video?: Array<{
+    video_id?: string;
+    pic_url?: string;
+    url1?: string;
+    url3?: string;
+    video_time?: string;
+    cover_width?: number;
+    cover_height?: number;
+  }>;
+  videototal?: number;
+  /** 设备信息 */
+  source_name?: string;
+  source_url?: string;
+  t1_termtype?: number;
+  /** 评论列表（h5-json 中内嵌） */
+  commentlist?: EnhancedComment[];
+  /** 权限字段 */
+  right?: number;
+  ugc_right?: number;
+  isEditable?: number;
+  secret?: number;
   [key: string]: unknown;
 }
 
@@ -59,6 +82,104 @@ export interface PictureMeta {
   width?: number;
   /** 图片高度 */
   height?: number;
+}
+
+/** 设备信息 */
+export interface DeviceInfo {
+  /** 设备名称（如 "Xiaomi 15 Pro"） */
+  name: string;
+  /** 设备链接 */
+  url?: string;
+  /** 终端类型（4=Android） */
+  termtype?: number;
+}
+
+/** 视频元数据结构 */
+export interface VideoMeta {
+  /** 视频 ID */
+  videoId: string;
+  /** 封面图 URL */
+  coverUrl: string;
+  /** 缩略图 URL */
+  thumbnailUrl?: string;
+  /** 视频播放 URL (.mp4) */
+  videoUrl?: string;
+  /** 时长（毫秒） */
+  duration: number;
+  /** 视频宽度 */
+  width: number;
+  /** 视频高度 */
+  height: number;
+}
+
+/** 艾特用户信息 */
+export interface Mention {
+  /** 被艾特用户 QQ */
+  uin: string;
+  /** 被艾特用户昵称 */
+  nick: string;
+  /** 1=好友 */
+  who: number;
+  /** 1=自动填充 */
+  auto: number;
+}
+
+/** 二级回复（评论的回复） */
+export interface ReplyComment {
+  /** 回复评论 ID */
+  commentId: string;
+  /** 回复者 QQ */
+  uin: string;
+  /** 回复者昵称 */
+  name: string;
+  /** 回复内容 */
+  content: string;
+  /** 创建时间戳 */
+  createdTime: number;
+  /** 格式化时间 */
+  createTime?: string;
+  /** 详细时间 */
+  createTime2?: string;
+  /** 艾特的用户列表 */
+  mentions?: Mention[];
+  /** 回复给哪个艾特用户 */
+  replyToMention?: Mention;
+  /** 来源 */
+  source?: string;
+}
+
+/** 增强评论结构（含二级回复） */
+export interface EnhancedComment {
+  /** 评论 ID */
+  commentId: string;
+  /** 评论者 QQ */
+  uin: string;
+  /** 评论者昵称 */
+  name: string;
+  /** 评论内容 */
+  content: string;
+  /** 创建时间戳 */
+  createdTime: number;
+  /** 格式化时间 */
+  createTime: string;
+  /** 详细时间 */
+  createTime2: string;
+  /** 二级回复数 */
+  replyNum: number;
+  /** 二级回复列表 */
+  replies?: ReplyComment[];
+  /** 艾特的用户列表 */
+  mentions?: Mention[];
+  /** 评论来源设备 */
+  sourceName?: string;
+  /** 评论来源 URL */
+  sourceUrl?: string;
+  /** 终端类型 */
+  termtype?: number;
+  /** 是否可删除 */
+  canDelete?: number;
+  /** 是否私密 */
+  isPrivate?: number;
 }
 
 /** 音乐分享元数据 */
@@ -84,7 +205,12 @@ export interface NormalizedItem {
   pics: string[];
   /** 图片详细元数据（含原始 URL、尺寸） */
   picsMeta?: PictureMeta[];
+  /** 视频 URL 列表（简化版） */
   videos?: string[];
+  /** 视频详细元数据（从 video 字段提取） */
+  videosMeta?: VideoMeta[];
+  /** 设备信息（如 "Xiaomi 15 Pro"） */
+  device?: DeviceInfo;
   forwardContent?: string;
   forwardUin?: string;
   forwardTid?: string;
@@ -103,14 +229,33 @@ export interface NormalizedItem {
   likeCurkey?: string;
   /** 音乐分享元数据（appid=202/2100 时填充） */
   musicShare?: MusicShareMeta;
+  /** 权限字段 */
+  right?: number;
+  /** UGC 权限 */
+  ugcRight?: number;
+  /** 是否可编辑 */
+  isEditable?: boolean;
+  /** 是否私密 */
+  isSecret?: boolean;
 }
 
 export interface QzoneComment {
   commentId: string;
   uin: string;
   nickname: string;
+  name?: string;
   content: string;
   createdTime: number;
+  /** 格式化时间 */
+  createTime?: string;
+  /** 详细时间 */
+  createTime2?: string;
+  /** 二级回复数 */
+  replyNum?: number;
+  /** 二级回复列表 */
+  replies?: ReplyComment[];
+  /** 艾特的用户列表 */
+  mentions?: Mention[];
   /** 回复目标用户 QQ 号（二级评论） */
   replyToUin?: string;
   /** 回复目标用户昵称（二级评论） */
@@ -121,6 +266,14 @@ export interface QzoneComment {
   parentCommentId?: string;
   /** 是否为二级评论（回复） */
   isReply?: boolean;
+  /** 评论来源设备 */
+  sourceName?: string;
+  /** 是否可删除 */
+  canDelete?: number;
+  /** 是否私密 */
+  isPrivate?: number;
+  /** 评论序号（帖子内从1递增） */
+  tid?: number;
 }
 
 export interface QzoneLike {

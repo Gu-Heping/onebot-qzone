@@ -6,6 +6,97 @@
 
 import { log, htmlUnescape, parseJsonp } from './utils.js';
 
+// ── 解析统计与验证 ─────────────────────────────
+
+/** 单次解析统计信息 */
+interface ParseStats {
+  strategy: string;
+  totalFound: number;
+  validItems: number;
+  invalidItems: number;
+  errors: string[];
+  durationMs: number;
+}
+
+/** 验证单个说说条目的关键字段 */
+function validateFeedItem(item: Record<string, unknown>, source: string): { valid: boolean; errors: string[] } {
+  const errors: string[] = [];
+
+  // 关键字段验证
+  if (!item['tid'] || typeof item['tid'] !== 'string' || item['tid'].length === 0) {
+    errors.push(`missing or invalid tid`);
+  }
+  if (!item['uin'] || typeof item['uin'] !== 'string' || item['uin'].length === 0) {
+    errors.push(`missing or invalid uin`);
+  }
+  if (typeof item['content'] !== 'string') {
+    errors.push(`missing or invalid content type`);
+  }
+  if (typeof item['created_time'] !== 'number' || item['created_time'] <= 0) {
+    errors.push(`missing or invalid created_time`);
+  }
+
+  if (errors.length > 0) {
+    log('DEBUG', `validateFeedItem [${source}]: tid=${item['tid']}, errors=[${errors.join(', ')}]`);
+  }
+
+  return { valid: errors.length === 0, errors };
+}
+
+/** HTML 预处理：统一清理和规范化 */
+function preprocessHtml(text: string): {
+  text: string;
+  stats: { originalLength: number; processedLength: number; replacements: number };
+} {
+  const startTime = Date.now();
+  const originalLength = text.length;
+  let replacements = 0;
+
+  // 1. 统一换行符
+  let processed = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+
+  // 2. 处理常见 HTML 实体（除了 htmlUnescape 已处理的）
+  processed = processed.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>');
+  replacements += (text.match(/&amp;|&lt;|&gt;/g) || []).length;
+
+  // 3. 清理多余的空白字符（保留结构需要的）
+  processed = processed.replace(/>\s+</g, '><');
+
+  // 4. 处理 data-pickey 中可能的转义
+  processed = processed.replace(/\\x22/g, '"').replace(/\\x3C/g, '<').replace(/\\x3E/g, '>').replace(/\\\//g, '/');
+
+  const duration = Date.now() - startTime;
+  log('DEBUG', `preprocessHtml: ${originalLength} -> ${processed.length} chars, ${replacements} replacements, ${duration}ms`);
+
+  return {
+    text: processed,
+    stats: { originalLength, processedLength: processed.length, replacements },
+  };
+}
+
+/** 多重正则匹配器：尝试多个模式直到成功 */
+function tryMultiplePatterns<T>(
+  text: string,
+  patterns: { pattern: RegExp; name: string }[],
+  extractFn: (match: RegExpExecArray) => T | null,
+): { result: T | null; matchedPattern: string; attempts: string[] } {
+  const attempts: string[] = [];
+
+  for (const { pattern, name } of patterns) {
+    pattern.lastIndex = 0; // 重置正则状态
+    const match = pattern.exec(text);
+    if (match) {
+      const result = extractFn(match);
+      if (result !== null) {
+        return { result, matchedPattern: name, attempts };
+      }
+    }
+    attempts.push(name);
+  }
+
+  return { result: null, matchedPattern: 'none', attempts };
+}
+
 // ── feeds3 说说解析 ─────────────────────────────
 
 /**
@@ -24,10 +115,22 @@ export function parseFeeds3Items(
   maxItems = 50,
   skipFeedData = false,
 ): Record<string, unknown>[] {
+  const startTime = Date.now();
   log('DEBUG', `parseFeeds3Items: text length=${text.length}, filterUin=${filterUin}, filterAppid=${filterAppid ?? '(any)'}, maxItems=${maxItems}, skipFeedData=${skipFeedData}`);
+
+  // HTML 预处理
+  const { text: processedText, stats: preprocessStats } = preprocessHtml(text);
 
   const msglist: Record<string, unknown>[] = [];
   const seenTids = new Set<string>();
+  const stats: ParseStats = {
+    strategy: 'feed_data',
+    totalFound: 0,
+    validItems: 0,
+    invalidItems: 0,
+    errors: [],
+    durationMs: 0,
+  };
 
   // ---- 策略 1：feed_data <i> 标签（最可靠）----
   const feedDataPat = /name="feed_data"\s*([^>]*)>/g;
@@ -455,8 +558,248 @@ export function parseFeeds3Items(
       return tb - ta;
     });
     log('DEBUG', `parseFeeds3Items: JS fallback found ${msglist.length} items`);
+    stats.strategy = 'js_fallback';
   } // end JS fallback block
+
+  // ── 最终验证和统计 ──
+  stats.durationMs = Date.now() - startTime;
+
+  // 验证所有解析出的条目
+  for (const item of msglist) {
+    const validation = validateFeedItem(item, stats.strategy);
+    if (validation.valid) {
+      stats.validItems++;
+    } else {
+      stats.invalidItems++;
+      if (stats.errors.length < 5) { // 限制错误日志数量
+        stats.errors.push(`tid=${item['tid']}: ${validation.errors.join(', ')}`);
+      }
+    }
+  }
+
+  stats.totalFound = msglist.length;
+
+  // 输出解析统计
+  log('INFO', `parseFeeds3Items: strategy=${stats.strategy}, total=${stats.totalFound}, valid=${stats.validItems}, invalid=${stats.invalidItems}, duration=${stats.durationMs}ms`);
+  if (stats.errors.length > 0) {
+    log('DEBUG', `parseFeeds3Items validation errors: ${stats.errors.join('; ')}`);
+  }
+
+  // 如果有效条目比例过低，发出警告
+  if (stats.totalFound > 0 && stats.validItems / stats.totalFound < 0.5) {
+    log('WARNING', `parseFeeds3Items: low validation rate ${stats.validItems}/${stats.totalFound} (${Math.round(stats.validItems / stats.totalFound * 100)}%)`);
+  }
+
   return msglist;
+}
+
+// ── 深度逆向新发现：辅助解析函数 ─────────────────────────────
+
+/** 解析艾特格式 @{} */
+export interface Mention {
+  uin: string;
+  nick: string;
+  who: number;
+  auto: number;
+}
+
+/**
+ * 解析艾特格式内容
+ * @param content 原始内容
+ * @returns 解析后的纯文本和艾特列表
+ */
+export function parseMentions(content: string): { text: string; mentions: Mention[] } {
+  const mentions: Mention[] = [];
+  const mentionPattern = /@\{uin:(\d+),nick:([^,]+),who:(\d+),auto:(\d+)\}/g;
+
+  let match: RegExpExecArray | null;
+  while ((match = mentionPattern.exec(content)) !== null) {
+    mentions.push({
+      uin: match[1],
+      nick: match[2],
+      who: parseInt(match[3], 10),
+      auto: parseInt(match[4], 10),
+    });
+  }
+
+  // 清理艾特标记，完全移除
+  const text = content.replace(mentionPattern, '').trim();
+
+  return { text, mentions };
+}
+
+/** 视频信息结构 */
+export interface VideoInfo {
+  videoId: string;
+  coverUrl: string;
+  /** 缩略图 URL */
+  thumbnailUrl?: string;
+  videoUrl?: string;
+  duration: number; // 毫秒
+  width: number;
+  height: number;
+}
+
+/**
+ * 从说说数据中提取视频信息
+ * @param raw 原始说说数据
+ * @returns 视频信息数组
+ */
+export function extractVideos(raw: Record<string, unknown>): VideoInfo[] {
+  const videos: VideoInfo[] = [];
+  const videoList = raw['video'] as Array<Record<string, unknown>> | undefined;
+
+  if (!Array.isArray(videoList)) return videos;
+
+  for (const v of videoList) {
+    if (!v['video_id']) continue;
+
+    videos.push({
+      videoId: String(v['video_id']),
+      coverUrl: String(v['pic_url'] || ''),
+      thumbnailUrl: v['url1'] as string | undefined,
+      videoUrl: v['url3'] as string | undefined,
+      duration: parseInt(String(v['video_time'] || '0'), 10),
+      width: parseInt(String(v['cover_width'] || '0'), 10),
+      height: parseInt(String(v['cover_height'] || '0'), 10),
+    });
+  }
+
+  return videos;
+}
+
+/** 二级回复结构 */
+export interface ReplyComment {
+  commentid: string;
+  uin: string;
+  name: string;
+  content: string;
+  createtime: number;
+  mentions: Mention[];
+  /** 被艾特的用户 */
+  reply_to_mention?: Mention;
+  _source: 'reply_list';
+}
+
+/**
+ * 解析二级回复（list_3）
+ * @param list3 原始 list_3 数组
+ * @param parentCommentId 父评论 ID
+ * @returns 解析后的二级回复列表
+ */
+export function parseReplyComments(
+  list3: Array<Record<string, unknown>>,
+  parentCommentId: string,
+): ReplyComment[] {
+  const replies: ReplyComment[] = [];
+
+  for (const item of list3) {
+    const rawContent = String(item['content'] || '');
+    const { text: content, mentions } = parseMentions(rawContent);
+
+    // 提取被艾特的用户（第一个艾特）
+    const replyToMention = mentions.length > 0 ? mentions[0] : undefined;
+
+    const reply: ReplyComment = {
+      commentid: `${parentCommentId}_r_${item['tid']}`,
+      uin: String(item['uin'] || ''),
+      name: String(item['name'] || ''),
+      content,
+      createtime: parseInt(String(item['create_time'] || '0'), 10),
+      mentions,
+      reply_to_mention: replyToMention,
+      _source: 'reply_list',
+    };
+
+    replies.push(reply);
+  }
+
+  return replies;
+}
+
+/** 增强的评论结构 */
+export interface EnhancedComment {
+  commentid: string;
+  uin: string;
+  name: string;
+  content: string;
+  createtime: number;
+  createTime: string;
+  createTime2: string;
+  reply_num: number;
+  /** 二级回复列表 */
+  replies?: ReplyComment[];
+  /** 艾特的用户列表 */
+  mentions?: Mention[];
+  source_name?: string;
+  source_url?: string;
+  t2_source?: number;
+  t2_subtype?: number;
+  t2_termtype?: number;
+  abledel?: number;
+  private?: number;
+  _source: 'h5_json' | 'feeds3_html';
+}
+
+/**
+ * 从 h5-json 评论数据解析增强评论
+ * @param raw 原始评论数据
+ * @returns 增强评论对象
+ */
+export function parseEnhancedComment(raw: Record<string, unknown>): EnhancedComment {
+  const rawContent = String(raw['content'] || '');
+  const { text: content, mentions } = parseMentions(rawContent);
+
+  const comment: EnhancedComment = {
+    commentid: String(raw['tid'] || ''),
+    uin: String(raw['uin'] || ''),
+    name: String(raw['name'] || ''),
+    content,
+    createtime: parseInt(String(raw['create_time'] || '0'), 10),
+    createTime: String(raw['createTime'] || ''),
+    createTime2: String(raw['createTime2'] || ''),
+    reply_num: parseInt(String(raw['reply_num'] || '0'), 10),
+    mentions: mentions.length > 0 ? mentions : undefined,
+    source_name: raw['source_name'] as string | undefined,
+    source_url: raw['source_url'] as string | undefined,
+    t2_source: raw['t2_source'] as number | undefined,
+    t2_subtype: raw['t2_subtype'] as number | undefined,
+    t2_termtype: raw['t2_termtype'] as number | undefined,
+    abledel: raw['abledel'] as number | undefined,
+    private: raw['private'] as number | undefined,
+    _source: 'h5_json',
+  };
+
+  // 解析二级回复
+  const list3 = raw['list_3'] as Array<Record<string, unknown>> | undefined;
+  if (Array.isArray(list3) && list3.length > 0) {
+    comment.replies = parseReplyComments(list3, comment.commentid);
+  }
+
+  return comment;
+}
+
+/** 设备信息 */
+export interface DeviceInfo {
+  name: string;
+  url?: string;
+  termtype?: number;
+}
+
+/**
+ * 提取设备信息
+ * @param raw 原始说说数据
+ * @returns 设备信息
+ */
+export function extractDeviceInfo(raw: Record<string, unknown>): DeviceInfo | undefined {
+  const name = raw['source_name'] as string;
+  if (!name) return undefined;
+
+  return {
+    name,
+    url: raw['source_url'] as string | undefined,
+    termtype: raw['t1_termtype'] as number | undefined,
+  };
 }
 
 // ── feeds3 评论提取 ─────────────────────────────
@@ -479,6 +822,33 @@ export interface Feeds3Comment {
   /** 是否为二级评论（回复） */
   is_reply?: boolean;
   _source: 'feeds3_html';
+}
+
+/** 验证单条评论的关键字段 */
+function validateComment(comment: Record<string, unknown>, source: string): { valid: boolean; errors: string[] } {
+  const errors: string[] = [];
+
+  if (!comment['commentid'] || typeof comment['commentid'] !== 'string' || comment['commentid'].length === 0) {
+    errors.push('missing or invalid commentid');
+  }
+  if (!comment['uin'] || typeof comment['uin'] !== 'string' || comment['uin'].length === 0) {
+    errors.push('missing or invalid uin');
+  }
+  if (!comment['name'] || typeof comment['name'] !== 'string' || comment['name'].length === 0) {
+    errors.push('missing or invalid name');
+  }
+  if (typeof comment['content'] !== 'string') {
+    errors.push('missing or invalid content type');
+  }
+  if (typeof comment['createtime'] !== 'number' || comment['createtime'] <= 0) {
+    errors.push('missing or invalid createtime');
+  }
+
+  if (errors.length > 0 && source === 'root') {
+    log('DEBUG', `validateComment [${source}]: commentid=${comment['commentid']}, errors=[${errors.join(', ')}]`);
+  }
+
+  return { valid: errors.length === 0, errors };
 }
 
 /**
@@ -530,10 +900,25 @@ function extractCommentContent(body: string, isReply: boolean): string {
   }
 
   // 一级评论：<a class="nickname">昵称</a>&nbsp;:&nbsp;内容
-  const rootPattern = /<a[^>]*class="[^"]*nickname[^"]*"[^>]*>[^<]*<\/a>(?:&nbsp;|\s)*[:：](?:&nbsp;|\s)*([\s\S]*?)(?:<div\s+class="comments-op|<div\s+class="mod-comments-sub|$)/i;
+  // 策略1：标准模式，匹配到 comments-op 或 mod-comments-sub
+  const rootPattern = /<a[^>]*class="[^"]*nickname[^"]*"[^>]*>[^<]*<\/a>(?:&nbsp;|\s)*[:：](?:&nbsp;|\s)*([\s\S]*?)(?:<div\s+class="comments-op|<div\s+class="mod-comments-sub|<\/div>\s*<div|$)/i;
   const rootMatch = body.match(rootPattern);
   if (rootMatch) {
     return htmlUnescape(rootMatch[1]!.replace(/<[^>]+>/g, '')).trim();
+  }
+
+  // 策略2：宽松模式，只匹配昵称链接后的冒号和内容
+  const loosePattern = /<a[^>]*class="[^"]*nickname[^"]*"[^>]*>[^<]*<\/a>\s*[:：]\s*([^<]+)/i;
+  const looseMatch = body.match(loosePattern);
+  if (looseMatch) {
+    return htmlUnescape(looseMatch[1]!.trim());
+  }
+
+  // 策略3：从 comments-content div 中提取纯文本（去掉昵称部分）
+  const contentPattern = /<div[^>]*class="[^"]*comments-content[^"]*"[^>]*>[\s\S]*?<\/a>\s*[:：]\s*([^<]+(?:<[^>]+>[^<]*)*)/i;
+  const contentMatch = body.match(contentPattern);
+  if (contentMatch) {
+    return htmlUnescape(contentMatch[1]!.replace(/<[^>]+>/g, '').trim());
   }
 
   return '';
@@ -658,13 +1043,25 @@ function findMatchingClosingCommentsItemLi(text: string, start: number): number 
 export function parseFeeds3Comments(
   text: string,
 ): Map<string, Record<string, unknown>[]> {
+  const startTime = Date.now();
   const result = new Map<string, Record<string, unknown>[]>();
+  const stats = {
+    rootComments: 0,
+    replyComments: 0,
+    validComments: 0,
+    invalidComments: 0,
+    errors: [] as string[],
+    durationMs: 0,
+  };
+
+  // HTML 预处理
+  const { text: processedText } = preprocessHtml(text);
 
   // 先收集全文所有 t1_tid 出现位置，用于关联评论到帖子
   const tidRefs: { index: number; postTid: string }[] = [];
   const tidPat = /t1_tid=([a-z0-9]+)/gi;
   let tidM: RegExpExecArray | null;
-  while ((tidM = tidPat.exec(text)) !== null) {
+  while ((tidM = tidPat.exec(processedText)) !== null) {
     tidRefs.push({ index: tidM.index, postTid: tidM[1]! });
   }
 
@@ -672,14 +1069,14 @@ export function parseFeeds3Comments(
   const rootCommentPat = /<li\s+class="comments-item[^"]*"[^>]*data-type="commentroot"[^>]*>/gi;
   let rootMatch: RegExpExecArray | null;
 
-  while ((rootMatch = rootCommentPat.exec(text)) !== null) {
+  while ((rootMatch = rootCommentPat.exec(processedText)) !== null) {
     const openTag = rootMatch[0];
     const openEnd = rootMatch.index + openTag.length;
-    const closeEnd = findMatchingClosingCommentsItemLi(text, openEnd);
+    const closeEnd = findMatchingClosingCommentsItemLi(processedText, openEnd);
     if (closeEnd < 0) continue;
 
-    const fullBlock = text.slice(rootMatch.index, closeEnd);
-    const body = text.slice(openEnd, closeEnd - 6);
+    const fullBlock = processedText.slice(rootMatch.index, closeEnd);
+    const body = processedText.slice(openEnd, closeEnd - 6);
 
     // 提取一级评论属性
     const rootTid = openTag.match(/data-tid="([^"]*)"/)?.[1] ?? '';
@@ -773,8 +1170,10 @@ export function parseFeeds3Comments(
         if (t2Tid) replyComment['reply_to_comment_id'] = t2Tid;
 
         result.get(postTid)!.push(replyComment);
+        stats.replyComments++;
       }
     }
+    stats.rootComments++;
   }
 
   // ── Fallback：处理没有 data-type 属性的旧格式评论 ──
@@ -843,8 +1242,31 @@ export function parseFeeds3Comments(
     result.get(postTid)!.push(comment);
   }
 
-  const total = [...result.values()].reduce((s, a) => s + a.length, 0);
-  log('DEBUG', `parseFeeds3Comments: found ${total} comments for ${result.size} posts`);
+  // ── 最终验证和统计 ──
+  stats.durationMs = Date.now() - startTime;
+
+  // 验证所有解析出的评论
+  for (const comments of result.values()) {
+    for (const comment of comments) {
+      const validation = validateComment(comment, 'root');
+      if (validation.valid) {
+        stats.validComments++;
+      } else {
+        stats.invalidComments++;
+        if (stats.errors.length < 10) {
+          stats.errors.push(`cid=${comment['commentid']}: ${validation.errors.join(', ')}`);
+        }
+      }
+    }
+  }
+
+  const total = stats.rootComments + stats.replyComments;
+  log('INFO', `parseFeeds3Comments: posts=${result.size}, root=${stats.rootComments}, replies=${stats.replyComments}, valid=${stats.validComments}, invalid=${stats.invalidComments}, duration=${stats.durationMs}ms`);
+
+  if (stats.errors.length > 0) {
+    log('DEBUG', `parseFeeds3Comments validation errors: ${stats.errors.slice(0, 5).join('; ')}${stats.errors.length > 5 ? '...' : ''}`);
+  }
+
   return result;
 }
 
