@@ -122,6 +122,7 @@ export function createApp(
   // WebSocket: universal API + Event
   // Use noServer mode to avoid path-match conflicts between multiple WSS instances
   const wssByPath = new Map<string, { wss: WebSocketServer; apiRole: boolean; eventRole: boolean }>();
+  const eventCallbacks: Array<(event: OneBotEvent) => void | Promise<void>> = [];
 
   function attachWss(path: string, apiRole: boolean, eventRole: boolean): WebSocketServer {
     const wss = new WebSocketServer({ noServer: true });
@@ -136,6 +137,7 @@ export function createApp(
         }
       };
       hub.subscribe(eventCb);
+      eventCallbacks.push(eventCb);
     }
 
     wss.on('connection', (ws, req) => {
@@ -206,6 +208,11 @@ export function createApp(
   }
 
   async function stop(): Promise<void> {
+    // 取消所有事件订阅
+    for (const cb of eventCallbacks) {
+      hub.unsubscribe(cb);
+    }
+    eventCallbacks.length = 0;
     return new Promise(resolve => {
       wssUniversal.close();
       wssApi.close();
