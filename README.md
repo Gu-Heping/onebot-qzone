@@ -19,7 +19,7 @@ QQ空间 → OneBot v11 协议桥接服务（TypeScript 原生实现）。
 | **信息查询** | 访客列表（含来源映射）、好友列表、用户信息、头像/昵称、相册/照片管理、设备信息（手机型号） |
 | **流量统计** | 说说的点赞/浏览/评论/转发 计数（`qz_opcnt2`） |
 | **隐私管理** | 设置说说公开/私密权限（`ugc_right`） |
-| **事件推送** | 新说说、新评论（含详情）、新点赞实时上报（独立定时器）、好友说说订阅 |
+| **事件推送** | 新说说、新评论（含详情）、新点赞实时上报（独立定时器，bestEffort 降级）、好友说说订阅 |
 | **Cookie 保活** | 每 10 分钟自动探活，失效及时告警 |
 | **OneBot v11** | HTTP API / WebSocket / 反向 WebSocket / HTTP POST |
 | **NapCat 原生** | `napcat-plugin/` 提供无侵入代理插件 |
@@ -33,9 +33,14 @@ QQ空间 → OneBot v11 协议桥接服务（TypeScript 原生实现）。
   3. **getCommentsLite 单次 POST**：仅发一个 `emotion_cgi_getcmtreply_v6` POST，circuit breaker 保护（2 次失败后 30 分钟冷却）
   4. **纯计数事件**：前三级不可用时，发射仅含 +N 计数的事件
 - 评论/详情接口 `getCommentsBestEffort` 保留多变体轮询，记住命中变体下次优先使用（供 API 调用，非轮询器）
-- 点赞检测双重策略：feeds3 HTML 内嵌点赞者详情（QQ / 昵称 / 时间 / 个性赞图标）+ `qz_opcnt2` 计数兜底
+- **点赞监听 bestEffort 降级**（新增）：
+  1. **PC detail**：`emotion_cgi_getdetailv6` 获取点赞列表
+  2. **Mobile detail**：mobile 端详情接口降级
+  3. **feeds3 兜底**：主动拉取 feeds3 HTML 解析点赞通知（含 QQ / 昵称 / 时间 / 个性赞图标）
+  4. **计数兜底**：`qz_opcnt2` 获取点赞数，结合缓存用户信息尽可能填充事件详情
+- 点赞检测双重策略：feeds3 HTML 内嵌点赞者详情 + `qz_opcnt2` 计数兜底
   - feeds3 HTML 解析出点赞者 QQ、昵称、时间、图标，事件推送可带详情
-  - feeds3 只覆盖最近点赞，剩余用计数事件补充
+  - feeds3 只覆盖最近点赞，剩余用计数事件补充（优先匹配缓存用户信息）
 - **是否已点赞**：通过 feeds3 获取的说说列表里，每条带 **`isLiked`**（boolean），表示当前登录用户是否已点过赞；也可调用 `get_like_list` 拿到点赞者列表，判断当前用户是否在列表中
 - 点赞使用 `internal_dolike_app` → `like_cgi_likev6` → Mobile 三级 fallback
 - 图片 URL 提取优先级：`url2` → `url3` → `url1` → `smallurl`（高清优先）
@@ -216,10 +221,12 @@ QZONE_PLAYWRIGHT_HEADLESS=1 npm run dev
 | `get_comment_list` | 获取评论列表 | `user_id`, `tid` |
 | `send_like` | 点赞说说 | `user_id`, `tid`, `abstime` |
 | `unlike` | 取消点赞 | `user_id`, `tid`, `abstime` |
-| `get_like_list` | 获取点赞列表 | `user_id`, `tid` |
-  - feeds3 HTML 解析模式：自动提取最近点赞者详情（QQ、昵称、时间、图标），无额外请求
-  - 详情事件推送：新点赞事件可带点赞者 QQ、昵称、时间、图标
-  - 计数模式：API不可用时只推送计数
+| `get_like_list` | 获取点赞列表（基础版） | `user_id`, `tid` |
+  - 依赖说说详情接口，简单直接但可能被限流
+| `get_like_list_best_effort` | 获取点赞列表（推荐） | `user_id`, `tid` |
+  - **多级降级**：PC detail → Mobile detail → feeds3 HTML → 空数组
+  - 带缓存机制，自动跨 scope 拉取，可靠性更高
+  - 事件推送可带完整点赞者详情（QQ、昵称、时间、个性赞图标）
 | `get_video_info` | 获取视频元数据 | `tid`（从 h5-json 解析 video 字段：MP4/封面/时长/尺寸） |
 | `parse_mentions` | 解析艾特用户 | 支持 `@{uin:QQ,nick:昵称,who:1,auto:1}` 格式 |
 | `get_device_info` | 获取设备信息 | `tid`（如 "Xiaomi 15 Pro"、终端类型） |

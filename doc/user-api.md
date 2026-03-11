@@ -117,6 +117,8 @@ const result = await getFriendFeeds(cursor, num);  // cursor?: string, num?: num
 
 ## 6. 获取点赞列表
 
+### 6.1 基础方法
+
 通过说说详情接口获取点赞用户列表：
 
 ```typescript
@@ -136,3 +138,36 @@ async getLikeList(uin: string, tid: string): Promise<Record<string, unknown>[]> 
 ```
 
 > 点赞用户列表依赖说说详情接口，而详情接口本身可能不稳定（参见 [emotion-api.md](emotion-api.md)），因此点赞列表的获取也不完全可靠。
+
+### 6.2 Best Effort 方法（推荐）
+
+**新增** `getLikeListBestEffort()` 提供多级降级策略，提高可靠性：
+
+```typescript
+async getLikeListBestEffort(uin: string, tid: string): Promise<Array<{
+  uin: string;
+  name?: string;
+  time?: number;
+  customItemId?: string;
+  _source: 'detail_pc' | 'detail_mobile' | 'feeds3_html';
+}>>
+```
+
+**降级链**：
+1. **PC detail** (`getShuoshuoDetail` PC 端)
+2. **Mobile detail** (`getShuoshuoDetail` mobile 端)
+3. **Feeds3 兜底** (主动拉取 feeds3 HTML 解析点赞通知)
+4. **空数组** (全部失败时)
+
+**特点**：
+- 内置缓存机制 (`feeds3LikesCache`)，避免重复解析
+- 支持跨 scope 拉取（scope=1 个人说说 → scope=0 好友动态流）
+- 轮询器自动使用此方法获取点赞列表
+
+**使用示例**：
+```typescript
+const likes = await client.getLikeListBestEffort(uin, tid);
+for (const like of likes) {
+  console.log(`${like.name} (${like.uin}) 点赞了`);
+}
+```
