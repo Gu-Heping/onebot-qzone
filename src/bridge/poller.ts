@@ -441,6 +441,12 @@ export class EventPoller {
 
   // ── 独立定时器调度 ──────────────────────────────
 
+  /** 添加随机抖动：±20% 的随机偏移 */
+  private addJitter(delayMs: number): number {
+    const jitterFactor = 0.8 + Math.random() * 0.4; // 0.8 ~ 1.2
+    return Math.round(delayMs * jitterFactor);
+  }
+
   private scheduleMain(delayMs: number): void {
     if (!this.running) return;
     this.mainTimer = setTimeout(async () => {
@@ -453,7 +459,8 @@ export class EventPoller {
         this.lastError = now();
         this.backoff = Math.min((this.backoff || 30) * 2, 300);
       }
-      this.scheduleMain(this.backoff > 0 ? this.backoff * 1000 : this.config.pollInterval * 1000);
+      const nextDelay = this.backoff > 0 ? this.backoff * 1000 : this.config.pollInterval * 1000;
+      this.scheduleMain(this.addJitter(nextDelay));
     }, delayMs);
   }
 
@@ -467,7 +474,7 @@ export class EventPoller {
           limit(() => safePoll(`comments/${tid.slice(0, 8)}`, () => this.pollComments(selfId, tid))),
         ));
       }
-      this.scheduleComments(this.config.commentPollInterval * 1000);
+      this.scheduleComments(this.addJitter(this.config.commentPollInterval * 1000));
     }, delayMs);
   }
 
@@ -481,7 +488,7 @@ export class EventPoller {
           limit(() => safePoll(`likes/${tid.slice(0, 8)}`, () => this.pollLikes(selfId, tid))),
         ));
       }
-      this.scheduleLikes(this.config.likePollInterval * 1000);
+      this.scheduleLikes(this.addJitter(this.config.likePollInterval * 1000));
     }, delayMs);
   }
 
@@ -491,7 +498,7 @@ export class EventPoller {
       if (this.client.loggedIn) {
         await safePoll('friendFeeds', () => this.pollFriendFeeds());
       }
-      this.scheduleFriendFeeds(this.config.friendFeedPollInterval * 1000);
+      this.scheduleFriendFeeds(this.addJitter(this.config.friendFeedPollInterval * 1000));
     }, delayMs);
   }
 

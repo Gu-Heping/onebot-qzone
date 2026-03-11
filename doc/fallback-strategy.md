@@ -143,6 +143,37 @@ if (this.detailWinningVariant !== null) {
 3. **PC 优先于 Mobile**: PC 端功能更完整，Mobile 仅作兜底
 4. **计数保护**: feeds3 缓存、跟踪字典、seen 集合等都有上限控制
 5. **认证失败检测**: 业务码 -3, -100, -3000, -10001, -10006 统一检测并触发退避
+6. **请求指纹随机化**: User-Agent、Accept-Language 随机化，轮询间隔添加 ±20% jitter
+
+## 请求指纹随机化（风控对抗）
+
+为防止被识别为机器人/爬虫，系统实现了多层请求指纹随机化：
+
+### User-Agent 随机化
+
+从 8 个常见浏览器 UA 中随机选择：
+- Chrome Windows (4 个版本)
+- Chrome macOS (2 个版本)
+- Edge Windows (2 个版本)
+
+### Accept-Language 随机化
+
+从 5 种中文语言偏好中随机选择：
+- `zh-CN,zh;q=0.9,en;q=0.8`
+- `zh-CN,zh;q=0.9,en-US;q=0.8,en;q=0.7`
+- `zh-CN,zh-TW;q=0.9,zh;q=0.8,en;q=0.7`
+- `zh;q=0.9,en;q=0.8`
+- `en-US,en;q=0.9,zh-CN;q=0.8`
+
+### 轮询间隔抖动 (Jitter)
+
+所有轮询定时器添加 ±20% 随机抖动：
+- 主轮询：`interval * (0.8 ~ 1.2)`
+- 评论轮询：`interval * (0.8 ~ 1.2)`
+- 点赞轮询：`interval * (0.8 ~ 1.2)`
+- 好友动态轮询：`interval * (0.8 ~ 1.2)`
+
+**效果**：避免固定时间间隔的请求模式，更接近真人浏览行为的不规律性。
 
 ## API 有效性判断
 

@@ -46,6 +46,7 @@ QQ空间 → OneBot v11 协议桥接服务（TypeScript 原生实现）。
 - 图片 URL 提取优先级：`url2` → `url3` → `url1` → `smallurl`（高清优先）
 - feeds3 LRU 缓存采用 O(1) Map 插入序逐出
 - feeds3 深度解析：视频元数据（MP4/封面/时长/尺寸）、二级回复、艾特用户、设备信息
+- **请求指纹随机化**：User-Agent/Accept-Language 随机化 + 轮询间隔抖动（±20%），降低风控识别风险
 - 可选 Playwright 提取 `qzonetoken`
 - 服务器环境自动 headless 检测（`$DISPLAY`），系统 Chrome 自动发现
 
