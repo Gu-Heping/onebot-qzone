@@ -181,6 +181,26 @@ const pattern = new RegExp(
     width?: number,
     height?: number
   }>,
+  videosMeta: Array<{   // 视频元数据（从 h5-json video 字段提取）
+    videoId: string,    // 视频 ID
+    coverUrl: string,   // 封面图 URL
+    thumbnailUrl?: string, // 缩略图 URL
+    videoUrl?: string,  // MP4 播放链接
+    duration: number,   // 时长（毫秒）
+    width: number,      // 视频宽度
+    height: number      // 视频高度
+  }>,
+  device: {             // 设备信息（h5-json）
+    name: string,       // 设备名称，如 "Xiaomi 15 Pro"
+    url?: string,       // 设备链接
+    termtype?: number   // 终端类型（4=Android）
+  },
+  mentions: Array<{     // 艾特的用户列表（h5-json 评论）
+    uin: string,        // 被艾特用户 QQ
+    nick: string,       // 被艾特用户昵称
+    who: number,        // 1=好友
+    auto: number        // 1=自动填充
+  }>,
   appid: string,        // 应用 ID（311=说说，202=网易云音乐）
   typeid: string,       // 类型 ID（0=原创，2=分享，5=转发）
   appName: string,      // 第三方应用名称（如「网易云音乐」）
@@ -271,9 +291,13 @@ const isForward = typeid === '5' ||
 |------|----------------------|-----------------|
 | 返回格式 | JSON/JSONP | HTML 片段 |
 | 稳定性 | 可能被限流 | ✅ 高度可靠 |
-| 数据丰富度 | 完整字段 | 基础字段 |
+| 数据丰富度 | 完整字段（视频/二级回复/设备信息） | 基础字段（HTML 内嵌评论） |
 | 转发数 | ✅ 提供 | ❌ 不提供 |
 | 点赞数 | ✅ 提供 | ❌ 不直接提供 |
+| 视频元数据 | ✅ MP4/封面/时长/尺寸 | ❌ 不直接提供 |
+| 二级回复 | ✅ list_3 字段 | ✅ HTML 嵌套结构 |
+| 艾特用户 | ✅ 评论 content 中 | ❌ 需从 HTML 提取 |
+| 设备信息 | ✅ source_name | ❌ 不直接提供 |
 | 好友动态 | 仅自己的说说 | ✅ 可获取好友动态 |
 | 解析复杂度 | 低（JSON） | 高（HTML 正则） |
 
@@ -492,3 +516,130 @@ const rootParams = {
 3. **回复失败处理**：如果 feeds3 评论回复失败，建议：
    - 在 QQ 空间网页端手动确认评论是否存在
    - 尝试通过 `getCommentsBestEffort` 重新获取评论列表（可能获得真实 ID）
+
+---
+
+## 深度解析功能（h5-json）
+
+除了 feeds3 HTML 解析，h5-json 接口（`emotion_cgi_msglist_v6`）返回的说说数据包含更丰富的字段。以下解析函数用于提取这些增强数据：
+
+### 视频解析 (`extractVideos`)
+
+从说说数据中的 `video` 字段提取视频元数据：
+
+```typescript
+const videos = extractVideos(rawEmotion);
+// 返回: VideoInfo[]
+// {
+//   videoId: string;      // 视频唯一ID
+//   coverUrl: string;     // 封面图URL
+//   thumbnailUrl?: string; // 缩略图URL
+//   videoUrl?: string;    // MP4播放链接
+//   duration: number;     // 时长（毫秒）
+//   width: number;        // 视频宽度
+//   height: number;       // 视频高度
+// }
+```
+
+**原始数据结构**：
+```json
+{
+  "video": [{
+    "video_id": "1074_0b53qffumrqa5uao3rmf4vutfaieiy2aamsa",
+    "pic_url": "http://photogzmaz.photo.store.qq.com/cover.jpg",
+    "url1": "https://photogzmaz.photo.store.qq.com/thumb.jpg",
+    "url3": "https://photovideo.photo.qq.com/xxx.mp4",
+    "video_time": "76000",
+    "cover_width": 1280,
+    "cover_height": 720
+  }],
+  "videototal": 1
+}
+```
+
+### 艾特用户解析 (`parseMentions`)
+
+解析评论内容中的艾特格式 `@{uin:QQ,nick:昵称,who:1,auto:1}`：
+
+```typescript
+const { text, mentions } = parseMentions(
+  '@{uin:3916743130,nick:新星,who:1,auto:1}看到小公鸡了'
+);
+// text: "看到小公鸡了"
+// mentions: [{ uin: "3916743130", nick: "新星", who: 1, auto: 1 }]
+```
+
+### 二级回复解析 (`parseReplyComments`)
+
+从 h5-json 评论的 `list_3` 字段解析二级回复（评论的回复）：
+
+```typescript
+const replies = parseReplyComments(list3, parentCommentId);
+// 返回: ReplyComment[]
+// {
+//   commentid: string;        // 回复ID
+//   uin: string;              // 回复者QQ
+//   name: string;             // 回复者昵称
+//   content: string;          // 回复内容（已解析艾特）
+//   createtime: number;       // 时间戳
+//   mentions: Mention[];      // 艾特列表
+//   reply_to_mention?: Mention; // 回复给哪个用户
+//   _source: 'reply_list';
+// }
+```
+
+**原始数据结构**：
+```json
+{
+  "reply_num": 1,
+  "list_3": [{
+    "content": "@{uin:3916743130,nick:新星,who:1,auto:1}看到小公鸡了",
+    "create_time": 1770380359,
+    "name": "倍耐力全雨胎",
+    "uin": 2464989387,
+    "tid": 1
+  }]
+}
+```
+
+### 设备信息提取 (`extractDeviceInfo`)
+
+从说说数据中提取设备信息：
+
+```typescript
+const device = extractDeviceInfo(rawEmotion);
+// 返回: DeviceInfo | undefined
+// {
+//   name: "Xiaomi 15 Pro",  // 设备名称
+//   url?: string,            // 设备链接
+//   termtype?: number        // 终端类型（4=Android）
+// }
+```
+
+**原始字段**：
+- `source_name`: 设备名称（如 "Xiaomi 15 Pro"）
+- `source_url`: 设备链接
+- `t1_termtype`: 终端类型（4=Android）
+
+### 增强评论解析 (`parseEnhancedComment`)
+
+综合解析 h5-json 评论，包含艾特和二级回复：
+
+```typescript
+const comment = parseEnhancedComment(rawComment);
+// 返回: EnhancedComment
+// {
+//   commentid: string;
+//   uin: string;
+//   name: string;
+//   content: string;          // 已清理艾特标记
+//   createtime: number;
+//   createTime: string;       // 格式化时间
+//   createTime2: string;      // 详细时间
+//   reply_num: number;        // 二级回复数
+//   replies?: ReplyComment[]; // 二级回复列表
+//   mentions?: Mention[];     // 艾特列表
+//   source_name?: string;     // 评论来源设备
+//   _source: 'h5_json';
+// }
+```

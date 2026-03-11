@@ -14,9 +14,9 @@ QQ空间 → OneBot v11 协议桥接服务（TypeScript 原生实现）。
 
 | 类别 | 内容 |
 |------|------|
-| **说说** | 发布/删除/查看，支持图片上传（含相册）、视频提取 |
-| **互动** | 评论、点赞/取消点赞（feeds3 HTML 点赞详情 + 三级 fallback）、转发 |
-| **信息查询** | 访客列表（含来源映射）、好友列表、用户信息、头像/昵称、相册/照片管理 |
+| **说说** | 发布/删除/查看，支持图片上传（含相册）、视频提取（MP4/封面/时长） |
+| **互动** | 评论（含二级回复/艾特解析）、点赞/取消点赞（feeds3 HTML 点赞详情 + 三级 fallback）、转发 |
+| **信息查询** | 访客列表（含来源映射）、好友列表、用户信息、头像/昵称、相册/照片管理、设备信息（手机型号） |
 | **流量统计** | 说说的点赞/浏览/评论/转发 计数（`qz_opcnt2`） |
 | **隐私管理** | 设置说说公开/私密权限（`ugc_right`） |
 | **事件推送** | 新说说、新评论（含详情）、新点赞实时上报（独立定时器）、好友说说订阅 |
@@ -40,6 +40,7 @@ QQ空间 → OneBot v11 协议桥接服务（TypeScript 原生实现）。
 - 点赞使用 `internal_dolike_app` → `like_cgi_likev6` → Mobile 三级 fallback
 - 图片 URL 提取优先级：`url2` → `url3` → `url1` → `smallurl`（高清优先）
 - feeds3 LRU 缓存采用 O(1) Map 插入序逐出
+- feeds3 深度解析：视频元数据（MP4/封面/时长/尺寸）、二级回复、艾特用户、设备信息
 - 可选 Playwright 提取 `qzonetoken`
 - 服务器环境自动 headless 检测（`$DISPLAY`），系统 Chrome 自动发现
 
@@ -219,6 +220,9 @@ QZONE_PLAYWRIGHT_HEADLESS=1 npm run dev
   - feeds3 HTML 解析模式：自动提取最近点赞者详情（QQ、昵称、时间、图标），无额外请求
   - 详情事件推送：新点赞事件可带点赞者 QQ、昵称、时间、图标
   - 计数模式：API不可用时只推送计数
+| `get_video_info` | 获取视频元数据 | `tid`（从 h5-json 解析 video 字段：MP4/封面/时长/尺寸） |
+| `parse_mentions` | 解析艾特用户 | 支持 `@{uin:QQ,nick:昵称,who:1,auto:1}` 格式 |
+| `get_device_info` | 获取设备信息 | `tid`（如 "Xiaomi 15 Pro"、终端类型） |
 | `forward_msg` | 转发说说 | `user_id`, `tid`, `content` |
 | `get_friend_list` | 获取好友列表 | — |
 | `get_stranger_info` | 获取用户信息 | `user_id` |
@@ -269,7 +273,7 @@ npm run build:plugin
 npm run dev              # 开发模式运行
 npm run build            # 编译主项目
 npm run build:plugin     # 编译 NapCat 插件
-npm run test             # 运行单元测试（105 项）
+npm run test             # 运行单元测试（127 项）
 npm run test:unit        # 同上
 npm run test:api         # 单元 + API 集成测试
 npm run test:api:readonly # 单元 + 只读 API 测试
@@ -281,7 +285,7 @@ npm run verify:readonly  # 端点健康检查（仅读接口）
 
 ### 测试说明
 
-- **单元测试**：`test/unit/` 下 9 个测试套件，共 105 项，纯本地运行不需要登录。
+- **单元测试**：`test/unit/` 下 10 个测试套件，共 127 项，纯本地运行不需要登录。
 - **API 测试**：需先启动 bridge 并登录，`--readonly` 模式仅验证读接口。
 - **端点健康检查**：`scripts/verify-endpoints.ts`，启动即检验 8 个读 + 2 个写端点，输出彩色 PASS/FAIL/SKIP 报告。
 
@@ -342,14 +346,15 @@ test/
 ├── run-all.ts             # 测试运行器
 ├── test-helpers.ts        # 测试工具函数
 ├── api-interfaces.ts      # API 集成测试
-└── unit/                  # 单元测试（9 套件，105 项）
+└── unit/                  # 单元测试（10 套件，127 项）
 
 doc/                       # QZone 逆向分析文档
 ├── api-overview.md        # API 总览
 ├── auth.md                # 认证机制
 ├── emotion-api.md         # 说说接口
 ├── social-api.md          # 社交互动接口
-├── feeds3-parser.md       # feeds3 HTML 解析
+├── feeds3-parser.md       # feeds3 HTML 解析（含视频/二级回复/艾特）
+├── deep-reverse-findings.md # 深度逆向发现汇总
 ├── photo-api.md           # 相册/照片接口
 ├── user-api.md            # 用户信息接口
 ├── fallback-strategy.md   # 降级策略
