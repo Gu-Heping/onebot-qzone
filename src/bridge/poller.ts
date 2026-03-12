@@ -148,19 +148,23 @@ export function normalizeEmotion(raw: Record<string, unknown>, selfUin: string):
   const uin = String(raw['uin'] ?? raw['frienduin'] ?? selfUin);
   const nickname = stripHtml(String(raw['nickname'] ?? raw['name'] ?? ''));
 
-  // 内容提取：优先 content 字段，fallback 到 conlist 重建
-  let content = processContent(String(
-    raw['content'] ?? raw['con'] ?? raw['cellcontent'] ?? '',
-  ));
-  // 当 content 为空但 conlist 存在时，从 conlist 重建内容文本（自动处理表情）
-  if (!content && Array.isArray(raw['conlist'])) {
-    content = rebuildContentFromConlist(raw['conlist'] as Array<Record<string, unknown>>, 'name');
+  // 内容提取：有 conlist 时优先从 conlist 重建（保证表情并入正文、不丢字），否则用 content/con
+  let content: string;
+  const conlist = raw['conlist'] as Array<Record<string, unknown>> | undefined;
+  if (Array.isArray(conlist) && conlist.length > 0) {
+    content = rebuildContentFromConlist(conlist, 'name');
+  } else {
+    content = processContent(String(
+      raw['content'] ?? raw['con'] ?? raw['cellcontent'] ?? '',
+    ));
   }
 
   const createdTime = safeInt(raw['createTime'] ?? raw['created_time'] ?? raw['ctime'] ?? raw['pubtime'] ?? 0);
   const cmtnum = safeInt(raw['cmtnum'] ?? raw['commentcnt'] ?? 0);
   const fwdnum = safeInt(raw['fwdnum'] ?? raw['forwardcnt'] ?? 0);
-  const pics: string[] = extractImages(raw['pic'] ?? raw['media'] ?? []);
+  let pics: string[] = extractImages(raw['pic'] ?? raw['media'] ?? []);
+  // 排除表情图 URL，避免把 [em] 渲染成的图算进「包含 N 张图片」
+  pics = pics.filter((url) => !/qzone\/em\/|gtimg\.cn.*\/em\//i.test(url));
 
   // 视频提取
   const { videoUrls, videoCoverUrls } = extractVideos(raw);
