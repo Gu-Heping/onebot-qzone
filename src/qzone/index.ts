@@ -58,6 +58,7 @@ export type { PlaywrightHandle } from './playwrightHelper.js';
 // Emoji processing
 export {
   EMOJI_NAME_MAP,
+  UNICODE_EMOJI_MAP,
   getEmojiUrl,
   getEmojiName,
   parseEmojis,
@@ -68,6 +69,10 @@ export {
   processEmojis,
   hasEmojis,
   countEmojis,
+  convertQqUnicodeToEmoji,
+  convertEmojiToQqCode,
+  hasUnicodeEmojis,
+  isUnicodeEmojiCode,
 } from './emoji.js';
 export type { EmojiConvertOptions } from './emoji.js';
 
