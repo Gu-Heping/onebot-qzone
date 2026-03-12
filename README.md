@@ -15,7 +15,7 @@ QQ空间 → OneBot v11 协议桥接服务（TypeScript 原生实现）。
 | 类别 | 内容 |
 |------|------|
 | **说说** | 发布/删除/查看，支持图片上传（含相册）、视频提取（MP4/封面/时长） |
-| **互动** | 评论（含二级回复/艾特解析）、点赞/取消点赞（feeds3 HTML 点赞详情 + 三级 fallback）、转发 |
+| **互动** | 评论（含二级回复/艾特解析/表情转换）、点赞/取消点赞（feeds3 HTML 点赞详情 + 三级 fallback）、转发 |
 | **信息查询** | 访客列表（含来源映射）、好友列表、用户信息、头像/昵称、相册/照片管理、设备信息（手机型号） |
 | **流量统计** | 说说的点赞/浏览/评论/转发 计数（`qz_opcnt2`） |
 | **隐私管理** | 设置说说公开/私密权限（`ugc_right`） |
@@ -45,7 +45,7 @@ QQ空间 → OneBot v11 协议桥接服务（TypeScript 原生实现）。
 - 点赞使用 `internal_dolike_app` → `like_cgi_likev6` → Mobile 三级 fallback
 - 图片 URL 提取优先级：`url2` → `url3` → `url1` → `smallurl`（高清优先）
 - feeds3 LRU 缓存采用 O(1) Map 插入序逐出
-- feeds3 深度解析：视频元数据（MP4/封面/时长/尺寸）、二级回复、艾特用户、设备信息
+- feeds3 深度解析：视频元数据（MP4/封面/时长/尺寸）、二级回复、艾特用户、设备信息、表情转换
 - **请求指纹随机化**：User-Agent/Accept-Language 随机化 + 轮询间隔抖动（±20%），降低风控识别风险
 - 可选 Playwright 提取 `qzonetoken`
 - 服务器环境自动 headless 检测（`$DISPLAY`），系统 Chrome 自动发现
@@ -229,7 +229,8 @@ QZONE_PLAYWRIGHT_HEADLESS=1 npm run dev
   - 带缓存机制，自动跨 scope 拉取，可靠性更高
   - 事件推送可带完整点赞者详情（QQ、昵称、时间、个性赞图标）
 | `get_video_info` | 获取视频元数据 | `tid`（从 h5-json 解析 video 字段：MP4/封面/时长/尺寸） |
-| `parse_mentions` | 解析艾特用户 | 支持 `@{uin:QQ,nick:昵称,who:1,auto:1}` 格式 |
+| `parse_mentions` | 解析艾特用户 | 支持 `@{uin:QQ,nick:昵称,who:1,auto:1}` 格式，自动提取并转换表情 |
+| `parse_emojis` | 解析表情 | 将 `[em]e100[/em]` 转换为 `[微笑]` 等可读名称，支持 150+ 常用表情 |
 | `get_device_info` | 获取设备信息 | `tid`（如 "Xiaomi 15 Pro"、终端类型） |
 | `forward_msg` | 转发说说 | `user_id`, `tid`, `content` |
 | `get_friend_list` | 获取好友列表 | — |

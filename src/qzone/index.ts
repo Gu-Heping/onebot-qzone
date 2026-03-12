@@ -19,10 +19,12 @@ export type {
   VideoMeta,
   Mention,
   ReplyComment,
-  EnhancedComment,
   MusicShareMeta,
   PostMeta,
+  EmojiInfo,
 } from './types.js';
+// feeds3Parser 使用下划线命名的 EnhancedComment，与 types.ts 中的略有不同
+export type { EnhancedComment } from './feeds3Parser.js';
 
 // Infra
 export { QzoneError, NetworkError, AuthError, SessionExpiredError, RateLimitError, AntiCrawlError, ApiBusinessError, ParseError, isQzoneError, isRetryable } from './infra/errors.js';
@@ -47,15 +49,27 @@ export {
 } from './feeds3Parser.js';
 export type {
   Feeds3Like,
-  Mention,
   VideoInfo,
-  ReplyComment,
-  EnhancedComment,
-  DeviceInfo,
   Feeds3Comment,
 } from './feeds3Parser.js';
 export { launchPlaywright } from './playwrightHelper.js';
 export type { PlaywrightHandle } from './playwrightHelper.js';
+
+// Emoji processing
+export {
+  EMOJI_NAME_MAP,
+  getEmojiUrl,
+  getEmojiName,
+  parseEmojis,
+  convertEmojisToNames,
+  convertNamesToEmojis,
+  convertEmojisToImages,
+  stripEmojis,
+  processEmojis,
+  hasEmojis,
+  countEmojis,
+} from './emoji.js';
+export type { EmojiConvertOptions } from './emoji.js';
 
 // Utilities
 export { calcGtk, parseJsonp, safeDecodeJsonResponse, log, htmlUnescape } from './utils.js';

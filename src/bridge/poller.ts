@@ -3,6 +3,7 @@ import type { BridgeConfig } from './config.js';
 import { EventHub } from './hub.js';
 import { safeInt } from './utils.js';
 import { htmlUnescape } from '../qzone/utils.js';
+import { processEmojis, parseEmojis, type EmojiConvertOptions } from '../qzone/emoji.js';
 import { env } from '../qzone/config/env.js';
 import { AuthError, isQzoneError } from '../qzone/infra/errors.js';
 import pLimit from 'p-limit';
@@ -96,17 +97,28 @@ export function extractVideos(raw: Record<string, unknown>): { videoUrls: string
  *   type 0: @某人 (有 uin/nick 属性)
  *   type 1: 纯文本
  *   type 2: 含表情的文本 (如 "[em]e10271[/em]")
+ *
+ * 增强功能：
+ *   - 表情自动转换为可读名称
+ *   - @提及保留在文本中
  */
-export function rebuildContentFromConlist(conlist: Array<Record<string, unknown>>): string {
+export function rebuildContentFromConlist(
+  conlist: Array<Record<string, unknown>>,
+  emojiMode: EmojiConvertOptions['mode'] = 'name'
+): string {
   const parts: string[] = [];
   for (const item of conlist) {
     const type = Number(item['type'] ?? -1);
     if (type === 0) {
-      // @人
+      // @人: 使用 nick 或 name
       const nick = String(item['nick'] ?? item['name'] ?? '');
-      parts.push(`@${nick}`);
+      if (nick) parts.push(`@${nick}`);
+    } else if (type === 2) {
+      // 含表情的文本: 处理表情转换
+      const con = String(item['con'] ?? item['content'] ?? '');
+      if (con) parts.push(processEmojis(con, { mode: emojiMode }));
     } else {
-      // type 1 (text) / type 2 (text with emoji) / others
+      // type 1 (纯文本) / others
       const con = String(item['con'] ?? item['content'] ?? '');
       if (con) parts.push(con);
     }
@@ -116,18 +128,33 @@ export function rebuildContentFromConlist(conlist: Array<Record<string, unknown>
 
 // NormalizedItem builder
 // ─────────────────────────────────────────────────────────
+
+/**
+ * 处理内容中的表情和@提及
+ * 1. 转换 [em]eXXX[/em] 表情为可读名称
+ * 2. 保留 @{uin,nick,who,auto} 格式供后续处理
+ */
+function processContent(content: string): string {
+  if (!content) return '';
+  // 先处理表情
+  let processed = processEmojis(content, { mode: 'name' });
+  // HTML 转义和标签清理
+  processed = stripHtml(processed);
+  return processed;
+}
+
 export function normalizeEmotion(raw: Record<string, unknown>, selfUin: string): NormalizedItem {
   const tid = String(raw['tid'] ?? raw['cellid'] ?? '');
   const uin = String(raw['uin'] ?? raw['frienduin'] ?? selfUin);
   const nickname = stripHtml(String(raw['nickname'] ?? raw['name'] ?? ''));
 
   // 内容提取：优先 content 字段，fallback 到 conlist 重建
-  let content = stripHtml(String(
+  let content = processContent(String(
     raw['content'] ?? raw['con'] ?? raw['cellcontent'] ?? '',
   ));
-  // 当 content 为空但 conlist 存在时，从 conlist 重建内容文本
+  // 当 content 为空但 conlist 存在时，从 conlist 重建内容文本（自动处理表情）
   if (!content && Array.isArray(raw['conlist'])) {
-    content = rebuildContentFromConlist(raw['conlist'] as Array<Record<string, unknown>>);
+    content = rebuildContentFromConlist(raw['conlist'] as Array<Record<string, unknown>>, 'name');
   }
 
   const createdTime = safeInt(raw['createTime'] ?? raw['created_time'] ?? raw['ctime'] ?? raw['pubtime'] ?? 0);
@@ -204,7 +231,18 @@ function normalizeComment(raw: Record<string, unknown>): QzoneComment {
   const commentId = String(raw['commentid'] ?? raw['comment_id'] ?? raw['id'] ?? '');
   const uin = String(raw['uin'] ?? raw['commentuin'] ?? '');
   const nickname = stripHtml(String(raw['name'] ?? raw['nick'] ?? ''));
-  const content = stripHtml(String(raw['content'] ?? raw['con'] ?? ''));
+
+  // 评论内容提取：优先 content/con 字段，支持 conlist 重建
+  let content: string;
+  const rawContent = raw['content'] ?? raw['con'] ?? '';
+  if (typeof rawContent === 'string' && rawContent) {
+    content = processContent(rawContent);
+  } else if (Array.isArray(raw['conlist'])) {
+    content = rebuildContentFromConlist(raw['conlist'] as Array<Record<string, unknown>>, 'name');
+  } else {
+    content = '';
+  }
+
   const createdTime = safeInt(raw['createtime'] ?? raw['create_time'] ?? raw['time'] ?? 0);
   const isReply = !!(raw['is_reply'] ?? raw['isReply']);
   const replyToUin = raw['reply_to_uin'] != null ? String(raw['reply_to_uin']) : (raw['replyToUin'] != null ? String(raw['replyToUin']) : undefined);
