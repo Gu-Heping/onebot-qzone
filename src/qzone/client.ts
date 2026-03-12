@@ -34,6 +34,7 @@ import {
 } from './feeds3Parser.js';
 import type { Feeds3Like } from './feeds3Parser.js';
 import { launchPlaywright } from './playwrightHelper.js';
+import { convertNamesToEmojis } from './emoji.js';
 
 // ──────────────────────────────────────────────
 // QzoneConfig
@@ -2184,6 +2185,10 @@ export class QzoneClient {
     whoCanSee?: number,
   ): Promise<[string, string[]]> {
     this.requireLogin();
+
+    // 转换表情格式：[微笑] -> [em]e100[/em]
+    content = convertNamesToEmojis(content);
+
     const picId: string[] = [];
 
     let data: Record<string, unknown>;
@@ -2372,6 +2377,10 @@ export class QzoneClient {
 
   async commentEmotion(ouin: string, tid: string, content: string, replyCommentId?: string, replyUin?: string, appid = 0, abstime = 0): Promise<ApiResponse> {
     this.requireLogin();
+
+    // 转换表情格式：[微笑] -> [em]e100[/em]
+    content = convertNamesToEmojis(content);
+
     // 自动从缓存补全缺失参数
     const meta = this.getPostMeta(tid);
     if (meta) {
@@ -2384,7 +2393,7 @@ export class QzoneClient {
     // 统一使用 h5.qzone.qq.com 域名的 emotion_cgi_re_feeds 接口
     // 抓包验证：topicId 格式为 {ouin}_{tid}__1，paramstr=2 表示回复评论
     const url = `https://h5.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_re_feeds?g_tk=${this.getGtk()}`;
-    
+
     // 回复评论时，需要在 content 前添加 @提及 格式：@{uin:xxx,nick:xxx,auto:1}
     let finalContent = content;
     if (replyCommentId && replyUin) {

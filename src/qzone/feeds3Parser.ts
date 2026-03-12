@@ -5,6 +5,8 @@
    ───────────────────────────────────────────── */
 
 import { log, htmlUnescape, parseJsonp } from './utils.js';
+import { processEmojis, parseEmojis } from './emoji.js';
+import type { EmojiInfo } from './types.js';
 
 // ── 解析统计与验证 ─────────────────────────────
 
@@ -606,9 +608,13 @@ export interface Mention {
 /**
  * 解析艾特格式内容
  * @param content 原始内容
+ * @param options 表情处理选项
  * @returns 解析后的纯文本和艾特列表
  */
-export function parseMentions(content: string): { text: string; mentions: Mention[] } {
+export function parseMentions(
+  content: string,
+  options: { processEmojis?: boolean } = { processEmojis: true }
+): { text: string; mentions: Mention[] } {
   const mentions: Mention[] = [];
   const mentionPattern = /@\{uin:(\d+),nick:([^,]+),who:(\d+),auto:(\d+)\}/g;
 
@@ -623,7 +629,12 @@ export function parseMentions(content: string): { text: string; mentions: Mentio
   }
 
   // 清理艾特标记，完全移除
-  const text = content.replace(mentionPattern, '').trim();
+  let text = content.replace(mentionPattern, '').trim();
+
+  // 可选：处理表情
+  if (options.processEmojis) {
+    text = processEmojis(text, { mode: 'name' });
+  }
 
   return { text, mentions };
 }
@@ -697,6 +708,9 @@ export function parseReplyComments(
     const rawContent = String(item['content'] || '');
     const { text: content, mentions } = parseMentions(rawContent);
 
+    // 提取表情信息
+    const { emojis } = parseEmojis(rawContent);
+
     // 提取被艾特的用户（第一个艾特）
     const replyToMention = mentions.length > 0 ? mentions[0] : undefined;
 
@@ -709,6 +723,7 @@ export function parseReplyComments(
       mentions,
       reply_to_mention: replyToMention,
       _source: 'reply_list',
+      ...(emojis.length > 0 && { emojis }),
     };
 
     replies.push(reply);
@@ -717,7 +732,7 @@ export function parseReplyComments(
   return replies;
 }
 
-/** 增强的评论结构 */
+/** 增强的评论结构（feeds3 专用，使用下划线命名保持兼容） */
 export interface EnhancedComment {
   commentid: string;
   uin: string;
@@ -739,6 +754,8 @@ export interface EnhancedComment {
   abledel?: number;
   private?: number;
   _source: 'h5_json' | 'feeds3_html';
+  /** 包含的表情列表 */
+  emojis?: EmojiInfo[];
 }
 
 /**
@@ -749,6 +766,9 @@ export interface EnhancedComment {
 export function parseEnhancedComment(raw: Record<string, unknown>): EnhancedComment {
   const rawContent = String(raw['content'] || '');
   const { text: content, mentions } = parseMentions(rawContent);
+
+  // 提取表情信息
+  const { emojis } = parseEmojis(rawContent);
 
   const comment: EnhancedComment = {
     commentid: String(raw['tid'] || ''),
@@ -768,6 +788,7 @@ export function parseEnhancedComment(raw: Record<string, unknown>): EnhancedComm
     abledel: raw['abledel'] as number | undefined,
     private: raw['private'] as number | undefined,
     _source: 'h5_json',
+    emojis: emojis.length > 0 ? emojis : undefined,
   };
 
   // 解析二级回复
@@ -876,6 +897,27 @@ function extractReplyToNickname(body: string): string | null {
 }
 
 /**
+ * 从 HTML 中提取表情 img 标签并转换为 [em]eXXX[/em] 格式
+ * 支持格式：<img src=".../qzone/em/e103.png" ...>
+ */
+function extractEmojisFromHtml(html: string): string {
+  // 匹配表情图片标签：提取 e103 这样的表情代码
+  return html.replace(/<img[^>]+src=["'][^"']*\/qzone\/em\/(e\d+)\.[^"']*["'][^>]*>/gi, (_, code) => {
+    return `[em]${code}[/em]`;
+  });
+}
+
+/**
+ * 清理 HTML 标签，但保留已转换的表情标记
+ */
+function stripHtmlTags(html: string): string {
+  // 先转换表情标签
+  const withEmojis = extractEmojisFromHtml(html);
+  // 再清理所有 HTML 标签
+  return withEmojis.replace(/<[^>]+>/g, '');
+}
+
+/**
  * 解析评论内容，支持一级评论和二级回复两种格式。
  * - 一级评论：`<a class="nickname">昵称</a>&nbsp;:&nbsp;内容`
  * - 二级回复：`<a class="nickname">昵称</a>&nbsp;回复<a class="nickname">目标</a>&nbsp;:&nbsp;内容`
@@ -888,14 +930,14 @@ function extractCommentContent(body: string, isReply: boolean): string {
     const replyPattern = /<a[^>]*class="[^"]*nickname[^"]*"[^>]*>[^<]*<\/a>(?:&nbsp;|\s)*回复(?:&nbsp;|\s)*<a[^>]*class="[^"]*nickname[^"]*"[^>]*>[^<]*<\/a>(?:&nbsp;|\s)*[:：](?:&nbsp;|\s)*([\s\S]*?)(?:<div\s+class="comments-op|<div\s+class="mod-comments-sub|$)/i;
     const replyMatch = body.match(replyPattern);
     if (replyMatch) {
-      return htmlUnescape(replyMatch[1]!.replace(/<[^>]+>/g, '')).trim();
+      return htmlUnescape(stripHtmlTags(replyMatch[1]!)).trim();
     }
 
     // Fallback：简化匹配 "回复 ... : 内容"
     const simplePattern = /回复[\s\S]*?[:：]\s*([\s\S]*?)(?:<div\s+class="comments-op|<div\s+class="mod-comments-sub|$)/i;
     const simpleMatch = body.match(simplePattern);
     if (simpleMatch) {
-      return htmlUnescape(simpleMatch[1]!.replace(/<[^>]+>/g, '')).trim();
+      return htmlUnescape(stripHtmlTags(simpleMatch[1]!)).trim();
     }
   }
 
@@ -904,7 +946,7 @@ function extractCommentContent(body: string, isReply: boolean): string {
   const rootPattern = /<a[^>]*class="[^"]*nickname[^"]*"[^>]*>[^<]*<\/a>(?:&nbsp;|\s)*[:：](?:&nbsp;|\s)*([\s\S]*?)(?:<div\s+class="comments-op|<div\s+class="mod-comments-sub|<\/div>\s*<div|$)/i;
   const rootMatch = body.match(rootPattern);
   if (rootMatch) {
-    return htmlUnescape(rootMatch[1]!.replace(/<[^>]+>/g, '')).trim();
+    return htmlUnescape(stripHtmlTags(rootMatch[1]!)).trim();
   }
 
   // 策略2：宽松模式，只匹配昵称链接后的冒号和内容
@@ -918,7 +960,7 @@ function extractCommentContent(body: string, isReply: boolean): string {
   const contentPattern = /<div[^>]*class="[^"]*comments-content[^"]*"[^>]*>[\s\S]*?<\/a>\s*[:：]\s*([^<]+(?:<[^>]+>[^<]*)*)/i;
   const contentMatch = body.match(contentPattern);
   if (contentMatch) {
-    return htmlUnescape(contentMatch[1]!.replace(/<[^>]+>/g, '').trim());
+    return htmlUnescape(stripHtmlTags(contentMatch[1]!)).trim();
   }
 
   return '';

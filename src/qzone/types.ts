@@ -2,6 +2,18 @@
    QZone TypeScript Bridge – shared type definitions
    ───────────────────────────────────────────── */
 
+/** 表情信息 */
+export interface EmojiInfo {
+  /** 表情代码 (如 e100) */
+  code: string;
+  /** 表情名称 (如 [微笑]) */
+  name: string;
+  /** 表情图片URL */
+  url: string;
+  /** 在文本中的位置 */
+  index: number;
+}
+
 export interface QzoneConfig {
   cachePath: string;
   qrcodePath?: string;
@@ -146,6 +158,8 @@ export interface ReplyComment {
   replyToMention?: Mention;
   /** 来源 */
   source?: string;
+  /** 包含的表情列表 */
+  emojis?: EmojiInfo[];
 }
 
 /** 增强评论结构（含二级回复） */
@@ -180,6 +194,8 @@ export interface EnhancedComment {
   canDelete?: number;
   /** 是否私密 */
   isPrivate?: number;
+  /** 包含的表情列表 */
+  emojis?: EmojiInfo[];
 }
 
 /** 音乐分享元数据 */
@@ -274,6 +290,8 @@ export interface QzoneComment {
   isPrivate?: number;
   /** 评论序号（帖子内从1递增） */
   tid?: number;
+  /** 包含的表情列表 */
+  emojis?: EmojiInfo[];
 }
 
 export interface QzoneLike {
