@@ -45,6 +45,14 @@ function validateFeedItem(item: Record<string, unknown>, source: string): { vali
   return { valid: errors.length === 0, errors };
 }
 
+/** 将秒级/毫秒级时间戳格式化为便于阅读的日期时间（YYYY-MM-DD HH:mm），便于 AI/客户端展示 */
+function formatTimestampToReadable(ts: number): string {
+  if (!Number.isFinite(ts) || ts <= 0) return '';
+  const ms = ts < 1e12 ? ts * 1000 : ts;
+  const d = new Date(ms);
+  return d.toISOString().replace('T', ' ').slice(0, 16);
+}
+
 /** HTML 预处理：统一清理和规范化 */
 function preprocessHtml(text: string): {
   text: string;
@@ -437,7 +445,7 @@ export function parseFeeds3Items(
 
     const item: Record<string, unknown> = {
       tid: canonicalTid, uin: dataUin, nickname, content,
-      created_time: timestamp, createTime: String(timestamp),
+      created_time: timestamp, createTime: formatTimestampToReadable(timestamp), createTime2: formatTimestampToReadable(timestamp),
       cmtnum, fwdnum: isForward ? 1 : 0,
       pic: images.map(u => ({ url: u })),
       picsMeta: picsMeta.length > 0 ? picsMeta : undefined,
@@ -537,7 +545,7 @@ export function parseFeeds3Items(
 
       const jsItem: Record<string, unknown> = {
         tid, uin: feedUin, nickname: jsNickname, content: jsContent,
-        created_time: jsAbstime, createTime: String(jsAbstime),
+        created_time: jsAbstime, createTime: formatTimestampToReadable(jsAbstime), createTime2: formatTimestampToReadable(jsAbstime),
         cmtnum: 0, fwdnum: jsIsForward ? 1 : 0, pic: [],
         appid,
         _source: 'feeds3',
