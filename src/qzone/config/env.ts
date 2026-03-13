@@ -46,6 +46,8 @@ export const env = {
   // ── 调试 / 特性开关 ──────────────────────
   get debugDump() { return bool('QZONE_DEBUG_DUMP'); },
   get friendPlaywright() { return bool('QZONE_FRIEND_PLAYWRIGHT'); },
+  /** 探针失败时跳过静默续期，仍用已缓存 Cookie 启动（无头环境 Chrome 不可用时使用） */
+  get skipRefreshOnStart() { return bool('QZONE_SKIP_REFRESH_ON_START'); },
 
   // ── 路径 ──────────────────────────────────
   get cachePath() { return str('QZONE_CACHE_PATH', './test_cache'); },

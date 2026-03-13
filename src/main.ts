@@ -37,15 +37,20 @@ async function main(): Promise<void> {
     log('INFO', '检测到已缓存 Cookie，正在校验是否有效...');
     const valid = await client.validateSession();
     if (!valid) {
-      // 探针全部失败 → 尝试静默续期（headless Playwright，不弹窗）
-      log('WARNING', '探针校验失败，尝试静默续期...');
-      const refreshed = await client.refreshSession();
-      if (refreshed) {
-        log('INFO', `静默续期成功，QQ号: ${client.qqNumber}`);
-        loginMethod = '缓存 Cookie + 静默续期';
+      if (env.skipRefreshOnStart) {
+        log('WARNING', '探针校验失败，QZONE_SKIP_REFRESH_ON_START=1，跳过续期，使用已缓存 Cookie 启动（部分接口可能失效）');
+        loginMethod = '缓存 Cookie（未续期）';
       } else {
-        log('WARNING', '已缓存 Cookie 已失效且续期失败，将清除并重新登录');
-        client.logout();
+        // 探针全部失败 → 尝试静默续期（headless Playwright，不弹窗）
+        log('WARNING', '探针校验失败，尝试静默续期...');
+        const refreshed = await client.refreshSession();
+        if (refreshed) {
+          log('INFO', `静默续期成功，QQ号: ${client.qqNumber}`);
+          loginMethod = '缓存 Cookie + 静默续期';
+        } else {
+          log('WARNING', '已缓存 Cookie 已失效且续期失败，将清除并重新登录');
+          client.logout();
+        }
       }
     } else {
       log('INFO', `已登录（缓存有效），QQ号: ${client.qqNumber}`);
