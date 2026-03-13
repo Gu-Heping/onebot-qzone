@@ -931,6 +931,16 @@ function stripHtmlTags(html: string): string {
  * - 二级回复：`<a class="nickname">昵称</a>&nbsp;回复<a class="nickname">目标</a>&nbsp;:&nbsp;内容`
  */
 function extractCommentContent(body: string, isReply: boolean): string {
+  // 辅助函数：截断 comments-op 开始的位置（处理嵌套在 content 内部的情况）
+  function truncateAtCommentsOp(html: string): string {
+    // 匹配 comments-op div 的开始（作为子元素或兄弟元素）
+    const opMatch = html.match(/<div\s+class="[^"]*comments-op[^"]*"/i);
+    if (opMatch) {
+      return html.slice(0, opMatch.index);
+    }
+    return html;
+  }
+
   // 二级回复：提取 "回复 ... :" 之后的内容
   if (isReply && body.includes('回复')) {
     // 模式：<a>昵称</a>&nbsp;回复<a>目标</a>&nbsp;:&nbsp;内容
@@ -938,14 +948,18 @@ function extractCommentContent(body: string, isReply: boolean): string {
     const replyPattern = /<a[^>]*class="[^"]*nickname[^"]*"[^>]*>[^<]*<\/a>(?:&nbsp;|\s)*回复(?:&nbsp;|\s)*<a[^>]*class="[^"]*nickname[^"]*"[^>]*>[^<]*<\/a>(?:&nbsp;|\s)*[:：](?:&nbsp;|\s)*([\s\S]*?)(?:<div\s+class="comments-op|<div\s+class="mod-comments-sub|$)/i;
     const replyMatch = body.match(replyPattern);
     if (replyMatch) {
-      return htmlUnescape(stripHtmlTags(replyMatch[1]!)).trim();
+      // 再次截断，防止 comments-op 嵌套在 content 内部
+      const truncated = truncateAtCommentsOp(replyMatch[1]!);
+      return htmlUnescape(stripHtmlTags(truncated)).trim();
     }
 
     // Fallback：简化匹配 "回复 ... : 内容"
     const simplePattern = /回复[\s\S]*?[:：]\s*([\s\S]*?)(?:<div\s+class="comments-op|<div\s+class="mod-comments-sub|$)/i;
     const simpleMatch = body.match(simplePattern);
     if (simpleMatch) {
-      return htmlUnescape(stripHtmlTags(simpleMatch[1]!)).trim();
+      // 再次截断，防止 comments-op 嵌套在 content 内部
+      const truncated = truncateAtCommentsOp(simpleMatch[1]!);
+      return htmlUnescape(stripHtmlTags(truncated)).trim();
     }
   }
 
@@ -954,7 +968,9 @@ function extractCommentContent(body: string, isReply: boolean): string {
   const rootPattern = /<a[^>]*class="[^"]*nickname[^"]*"[^>]*>[^<]*<\/a>(?:&nbsp;|\s)*[:：](?:&nbsp;|\s)*([\s\S]*?)(?:<div\s+class="comments-op|<div\s+class="mod-comments-sub|<\/div>\s*<div|$)/i;
   const rootMatch = body.match(rootPattern);
   if (rootMatch) {
-    return htmlUnescape(stripHtmlTags(rootMatch[1]!)).trim();
+    // 再次截断，防止 comments-op 嵌套在 content 内部
+    const truncated = truncateAtCommentsOp(rootMatch[1]!);
+    return htmlUnescape(stripHtmlTags(truncated)).trim();
   }
 
   // 策略2：宽松模式，只匹配昵称链接后的冒号和内容
@@ -968,7 +984,9 @@ function extractCommentContent(body: string, isReply: boolean): string {
   const contentPattern = /<div[^>]*class="[^"]*comments-content[^"]*"[^>]*>[\s\S]*?<\/a>\s*[:：]\s*([^<]+(?:<[^>]+>[^<]*)*)/i;
   const contentMatch = body.match(contentPattern);
   if (contentMatch) {
-    return htmlUnescape(stripHtmlTags(contentMatch[1]!)).trim();
+    // 再次截断，防止 comments-op 嵌套在 content 内部
+    const truncated = truncateAtCommentsOp(contentMatch[1]!);
+    return htmlUnescape(stripHtmlTags(truncated)).trim();
   }
 
   return '';
