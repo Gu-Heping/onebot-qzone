@@ -80,6 +80,26 @@ function fail(retcode: number, msg: string, echo?: string): OneBotResponse {
   return { status: 'failed', retcode, data: null, message: msg, echo };
 }
 
+/** 将秒级/毫秒级时间戳格式化为便于阅读的 YYYY-MM-DD HH:mm */
+function formatTimestampToReadable(ts: number): string {
+  if (!Number.isFinite(ts) || ts <= 0) return '';
+  const ms = ts < 1e12 ? ts * 1000 : ts;
+  const d = new Date(ms);
+  return d.toISOString().replace('T', ' ').slice(0, 16);
+}
+
+/** 为 get_emotion_list 返回的 msglist 中每条补充 createTime/createTime2（便于 AI/客户端展示，避免仅显示时间戳） */
+function ensureReadableTimeOnMsglist(res: Record<string, unknown>): void {
+  const msglist = (res['msglist'] ?? (res['data'] as Record<string, unknown>)?.msglist) as Record<string, unknown>[] | undefined;
+  if (!Array.isArray(msglist)) return;
+  for (const item of msglist) {
+    const ts = Number(item['created_time'] ?? item['createdTime'] ?? 0);
+    if (!ts || !Number.isFinite(ts)) continue;
+    if (!item['createTime2']) item['createTime2'] = formatTimestampToReadable(ts);
+    if (!item['createTime'] || String(item['createTime']).match(/^\d+$/)) item['createTime'] = formatTimestampToReadable(ts);
+  }
+}
+
 // ──────────────────────────────────────────────
 // ActionHandler
 // ──────────────────────────────────────────────
@@ -326,6 +346,7 @@ export class ActionHandler {
     const num = Math.max(1, Math.min(200, safeInt(p['num'] ?? 50)));
     const maxPages = Math.max(1, Math.min(30, safeInt(p['max_pages'] ?? p['pages'] ?? 15)));
     const res = await this.client.getEmotionList(uin, pos, num, undefined, undefined, undefined, maxPages);
+    if (res && typeof res === 'object') ensureReadableTimeOnMsglist(res as Record<string, unknown>);
     return ok(res, echo);
   }
 
