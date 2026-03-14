@@ -957,25 +957,18 @@ function extractCommentContent(body: string, isReply: boolean): string {
   }
 
   // 二级回复：提取 "回复 ... :" 之后的内容
-  if (isReply && body.includes('回复')) {
+  // 注意：自己对自己的回复没有"回复"文本，格式同一级评论，需要 fallthrough
+  if (isReply) {
+    // 先检查是否有真正的"回复某人:"模式（排除按钮上的"回复"文字）
     // 模式：<a>昵称</a>&nbsp;回复<a>目标</a>&nbsp;:&nbsp;内容
-    // 注意：回复后面可能没有空格，直接紧跟 <a> 标签
-    const replyPattern = /<a[^>]*class="[^"]*nickname[^"]*"[^>]*>[^<]*<\/a>(?:&nbsp;|\s)*回复(?:&nbsp;|\s)*<a[^>]*class="[^"]*nickname[^"]*"[^>]*>[^<]*<\/a>(?:&nbsp;|\s)*[:：](?:&nbsp;|\s)*([\s\S]*?)(?:<div\s+class="comments-op|<div\s+class="mod-comments-sub|$)/i;
+    const replyPattern = /<a[^>]*class="[^"]*nickname[^"]*"[^>]*>[^<]*<\/a>(?:&nbsp;|\s)*回复(?:\s*<a[^>]*class="[^"]*nickname[^"]*"[^>]*>[^<]*<\/a>)(?:&nbsp;|\s)*[:：](?:&nbsp;|\s)*([\s\S]*?)(?:<div\s+class="comments-op|<div\s+class="mod-comments-sub|$)/i;
     const replyMatch = body.match(replyPattern);
     if (replyMatch) {
       // 再次截断，防止 comments-op 嵌套在 content 内部
       const truncated = truncateAtCommentsOp(replyMatch[1]!);
       return htmlUnescape(stripHtmlTags(truncated)).trim();
     }
-
-    // Fallback：简化匹配 "回复 ... : 内容"
-    const simplePattern = /回复[\s\S]*?[:：]\s*([\s\S]*?)(?:<div\s+class="comments-op|<div\s+class="mod-comments-sub|$)/i;
-    const simpleMatch = body.match(simplePattern);
-    if (simpleMatch) {
-      // 再次截断，防止 comments-op 嵌套在 content 内部
-      const truncated = truncateAtCommentsOp(simpleMatch[1]!);
-      return htmlUnescape(stripHtmlTags(truncated)).trim();
-    }
+    // 如果没有匹配到，可能是自己对自己的回复，继续执行下面的 root 处理
   }
 
   // 一级评论：<a class="nickname">昵称</a>&nbsp;:&nbsp;内容
@@ -1170,9 +1163,11 @@ export function parseFeeds3Comments(
     // 提取帖子 TID（t1_tid）
     let postTid = fullBlock.match(/t1_tid=([a-z0-9]+)/i)?.[1] ?? '';
     if (!postTid && tidRefs.length) {
-      const next = tidRefs.find((r) => r.index >= closeEnd);
-      if (next) postTid = next.postTid;
-      else postTid = tidRefs[tidRefs.length - 1]!.postTid;
+      // 找评论开始位置之前的最后一个 tid（tid 在评论容器前面）
+      const prevTids = tidRefs.filter((r) => r.index < rootMatch.index);
+      if (prevTids.length > 0) {
+        postTid = prevTids[prevTids.length - 1]!.postTid;
+      }
     }
     if (!postTid) continue;
 
@@ -1353,6 +1348,121 @@ export function parseFeeds3Comments(
   return result;
 }
 
+// ── feeds3 说说正文和元数据提取 ─────────────────────────────
+
+/** 单条说说的元数据（正文、浏览次数、点赞数等） */
+export interface PostMeta {
+  tid: string;
+  uin: string;
+  content: string;
+  views: number;
+  likeCount: number;
+  commentCount: number;
+  createTime?: number;
+  _source: 'feeds3_html';
+}
+
+/**
+ * 从 feeds3 HTML 中提取说说正文和元数据。
+ * 支持单条说说格式和流格式。
+ * @param text 原始 HTML 文本
+ * @param processedText 预处理后的 HTML（可选）
+ * @returns Map<tid, PostMeta>
+ */
+export function parseFeeds3PostMeta(
+  text: string,
+  processedText?: string,
+): Map<string, PostMeta> {
+  const result = new Map<string, PostMeta>();
+  const html = processedText ?? preprocessHtml(text).text;
+
+  // 策略1：查找所有 t1_tid，然后提取附近的内容
+  const tidPattern = /t1_tid=([a-z0-9]+)/g;
+  const tidPositions: { tid: string; index: number }[] = [];
+  let tm: RegExpExecArray | null;
+
+  while ((tm = tidPattern.exec(html)) !== null) {
+    // 去重，同一个 tid 只保留第一次出现
+    if (!tidPositions.some(t => t.tid === tm![1])) {
+      tidPositions.push({ tid: tm[1], index: tm.index });
+    }
+  }
+
+  for (let i = 0; i < tidPositions.length; i++) {
+    const { tid } = tidPositions[i];
+    const startIdx = tidPositions[i].index;
+    const endIdx = i < tidPositions.length - 1 ? tidPositions[i + 1].index : html.length;
+    const block = html.slice(startIdx, endIdx);
+
+    // 提取 uin
+    const uinMatch = block.match(/t1_uin=(\d+)/);
+    const uin = uinMatch?.[1] ?? '';
+
+    // 提取正文 - 在 f-info 中
+    let content = '';
+    const fInfoMatch = block.match(/class="f-info[^"]*"[^>]*>([\s\S]*?)<\/div>/i);
+    if (fInfoMatch) {
+      // 去掉 HTML 标签
+      content = fInfoMatch[1]
+        .replace(/<[^>]+>/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+    }
+
+    // 如果 f-info 没内容，尝试其他模式
+    if (!content) {
+      // 尝试查找说说内容在 pre 或特定容器中
+      const preMatch = block.match(/<pre[^>]*>([\s\S]*?)<\/pre>/i);
+      if (preMatch) {
+        content = preMatch[1].replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+      }
+    }
+
+    // 提取浏览次数
+    let views = 0;
+    const viewMatch = block.match(/浏览\s*(\d+)\s*次/);
+    if (viewMatch) {
+      views = parseInt(viewMatch[1], 10);
+    }
+
+    // 提取点赞数
+    let likeCount = 0;
+    const likeCntMatch = block.match(/class="f-like-cnt"[^>]*>(\d+)</);
+    if (likeCntMatch) {
+      likeCount = parseInt(likeCntMatch[1], 10);
+    }
+
+    // 提取评论数
+    let commentCount = 0;
+    const cmtMatch = block.match(/cmtnum[=:]\s*["']?(\d+)/i);
+    if (cmtMatch) {
+      commentCount = parseInt(cmtMatch[1], 10);
+    }
+
+    // 提取时间（如果存在）
+    let createTime: number | undefined;
+    const abstimeMatch = block.match(/data-abstime="(\d+)"/);
+    if (abstimeMatch) {
+      createTime = parseInt(abstimeMatch[1], 10);
+    }
+
+    if (content || views > 0 || likeCount > 0) {
+      result.set(tid, {
+        tid,
+        uin,
+        content,
+        views,
+        likeCount,
+        commentCount,
+        createTime,
+        _source: 'feeds3_html',
+      });
+    }
+  }
+
+  return result;
+}
+
 // ── feeds3 点赞提取 ─────────────────────────────
 
 /** feeds3 HTML 中解析出来的单条点赞 */
@@ -1367,22 +1477,103 @@ export interface Feeds3Like {
 }
 
 /**
+ * 从单条说说 HTML 中提取点赞用户列表。
+ * 格式：<div class="user-list"><a...>用户1</a>、<a...>用户2</a>...</div>
+ * @param html 预处理的 HTML 文本
+ * @param tid 帖子 ID
+ * @param ownerUin 主人 QQ
+ */
+function parseSinglePostLikes(
+  html: string,
+  tid: string,
+  ownerUin: string,
+): Feeds3Like[] {
+  const likes: Feeds3Like[] = [];
+
+  // 匹配 user-list 块
+  const userListMatch = html.match(/class="user-list"[^>]*>([\s\S]*?)<\/div>/i);
+  if (!userListMatch) return likes;
+
+  const userListHtml = userListMatch[1];
+
+  // 提取所有 <a> 标签中的用户
+  const linkPattern = /<a[^>]*href="http:\/\/user\.qzone\.qq\.com\/(\d+)"[^>]*>([\s\S]*?)<\/a>/g;
+  let m: RegExpExecArray | null;
+
+  while ((m = linkPattern.exec(userListHtml)) !== null) {
+    const uin = m[1];
+    const innerHtml = m[2];
+    // 去掉内部标签（如 <i>owner</i>）
+    const nickname = htmlUnescape(innerHtml.replace(/<[^>]+>/g, '').replace(/、/g, '').trim());
+
+    if (uin && nickname) {
+      likes.push({
+        uin,
+        nickname,
+        tid,
+        ownerUin,
+        abstime: 0,
+        customItemId: '',
+        _source: 'feeds3_html',
+      });
+    }
+  }
+
+  return likes;
+}
+
+/**
  * 从 feeds3 HTML 中提取点赞详情。
  *
- * feeds3 的 feedstype="101" 项就是点赞通知，结构：
- * - `<a href="http://user.qzone.qq.com/{likerUin}" link="nameCard_{likerUin}">{昵称}</a>`
- * - `<i name="feed_data" data-tid="{postTid}" data-uin="{ownerUin}" data-feedstype="101" data-abstime="{timestamp}">`
- * - `<img data-custom_itemid="{iconId}" class="f-like-icon">`
+ * 支持两种格式：
+ * 1. feeds3 流格式：feedstype="101" 项
+ *    - `<a href="http://user.qzone.qq.com/{likerUin}" link="nameCard_{likerUin}">{昵称}</a>`
+ *    - `<i name="feed_data" data-tid="{postTid}" data-uin="{ownerUin}" data-feedstype="101" data-abstime="{timestamp}">`
+ * 2. 单条说说格式：
+ *    - `<div class="user-list"><a...>用户</a>...</div>`
+ *    - `<span class="f-like-cnt">37</span>`
  *
  * 返回 Map<postTid, Feeds3Like[]>，按帖子分组。
  * @param text  feeds3_html_more 原始文本（已 unescape）
+ * @param processedText 预处理后的 HTML（可选，避免重复处理）
  */
 export function parseFeeds3Likes(
   text: string,
+  processedText?: string,
 ): Map<string, Feeds3Like[]> {
   const result = new Map<string, Feeds3Like[]>();
+  const html = processedText ?? preprocessHtml(text).text;
 
-  // 匹配每个 feed item div 并提取 feed_data
+  // 策略1：单条说说格式（user-list）
+  // 查找所有 t1_tid，然后在附近查找 user-list
+  const tidPattern = /t1_tid=([a-z0-9]+)/g;
+  const tidPositions: { tid: string; index: number }[] = [];
+  let tm: RegExpExecArray | null;
+  while ((tm = tidPattern.exec(html)) !== null) {
+    tidPositions.push({ tid: tm[1], index: tm.index });
+  }
+
+  // 对每个 tid，在附近查找 user-list
+  for (let i = 0; i < tidPositions.length; i++) {
+    const { tid } = tidPositions[i];
+    const startIdx = tidPositions[i].index;
+    const endIdx = i < tidPositions.length - 1 ? tidPositions[i + 1].index : html.length;
+    const block = html.slice(startIdx, endIdx);
+
+    // 检查是否有 user-list
+    if (block.includes('user-list')) {
+      // 提取 ownerUin（从 t1_uin=xxx）
+      const ownerMatch = block.match(/t1_uin=(\d+)/);
+      const ownerUin = ownerMatch?.[1] ?? '';
+
+      const likes = parseSinglePostLikes(block, tid, ownerUin);
+      if (likes.length > 0) {
+        result.set(tid, likes);
+      }
+    }
+  }
+
+  // 策略2：feeds3 流格式（feedstype="101"）
   const feedItemPat = /<div\s+class="f-item[^"]*f-item-passive"\s+id="feed_(\d+)_(\d+)_(\d+)_(\d+)_\d+_\d+"[\s\S]*?name="feed_data"\s*([^>]*)>[\s\S]*?(?=<div\s+class="f-item|<\/ul>|$)/g;
   const dataAttr = (attrs: string, name: string): string => {
     const m = attrs.match(new RegExp(`data-${name}="([^"]*)"`));
@@ -1390,7 +1581,7 @@ export function parseFeeds3Likes(
   };
 
   let fm: RegExpExecArray | null;
-  while ((fm = feedItemPat.exec(text)) !== null) {
+  while ((fm = feedItemPat.exec(html)) !== null) {
     const feedDataAttrs = fm[5]!;
     const feedstype = dataAttr(feedDataAttrs, 'feedstype');
     if (feedstype !== '101') continue;
@@ -1403,7 +1594,7 @@ export function parseFeeds3Likes(
 
     // 提取昵称：在 feed item 之前的 user-info 区域
     const blockStart = Math.max(0, fm.index - 600);
-    const preceding = text.substring(blockStart, fm.index);
+    const preceding = html.substring(blockStart, fm.index);
     let nickname = '';
     const nickMatch = preceding.match(/link="nameCard_\d+"[^>]*>([^<]+)<\/a>/);
     if (nickMatch) {
@@ -1426,7 +1617,11 @@ export function parseFeeds3Likes(
     };
 
     if (!result.has(tid)) result.set(tid, []);
-    result.get(tid)!.push(like);
+    // 避免重复添加
+    const existing = result.get(tid)!.find(l => l.uin === likerUin);
+    if (!existing) {
+      result.get(tid)!.push(like);
+    }
   }
 
   // 去重（同一 tid 下同一 uin 只保留最新）
