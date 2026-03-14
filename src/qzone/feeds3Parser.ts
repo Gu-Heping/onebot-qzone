@@ -936,7 +936,19 @@ function extractCommentContent(body: string, isReply: boolean): string {
     // 匹配 comments-op div 的开始（作为子元素或兄弟元素）
     const opMatch = html.match(/<div\s+class="[^"]*comments-op[^"]*"/i);
     if (opMatch) {
-      return html.slice(0, opMatch.index);
+      // 截断到 comments-op 开始之前
+      let truncated = html.slice(0, opMatch.index);
+      // 清理可能残留的未闭合 HTML 标签（如 <a href="..." 这样的不完整标签）
+      // 找到最后一个 '<'，如果后面没有对应的 '>'，就截断到 '<' 之前
+      const lastLt = truncated.lastIndexOf('<');
+      if (lastLt >= 0) {
+        const afterLt = truncated.slice(lastLt);
+        // 如果 '<' 后面没有 '>'，说明标签未闭合，需要截断
+        if (!afterLt.includes('>')) {
+          truncated = truncated.slice(0, lastLt);
+        }
+      }
+      return truncated;
     }
     return html;
   }
