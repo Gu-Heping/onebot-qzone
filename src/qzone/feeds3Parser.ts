@@ -939,12 +939,15 @@ function extractCommentContent(body: string, isReply: boolean): string {
       // 截断到 comments-op 开始之前
       let truncated = html.slice(0, opMatch.index);
       // 清理可能残留的未闭合 HTML 标签（如 <a href="..." 这样的不完整标签）
-      // 找到最后一个 '<'，如果后面没有对应的 '>'，就截断到 '<' 之前
+      // 检查截断位置前的最后一个 '<'，如果它看起来像标签开头且未闭合，则移除
       const lastLt = truncated.lastIndexOf('<');
       if (lastLt >= 0) {
         const afterLt = truncated.slice(lastLt);
-        // 如果 '<' 后面没有 '>'，说明标签未闭合，需要截断
-        if (!afterLt.includes('>')) {
+        // 检查 '<' 后面是否跟着标签名字符（a-z, A-Z, /），且没有闭合的 '>'
+        // 这样可以避免误伤内容中的 '<' 符号（如 "3 < 5"）
+        const looksLikeTag = /^<[a-zA-Z\/]/.test(afterLt);
+        const hasClose = afterLt.includes('>');
+        if (looksLikeTag && !hasClose) {
           truncated = truncated.slice(0, lastLt);
         }
       }
