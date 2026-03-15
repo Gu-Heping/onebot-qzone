@@ -692,14 +692,19 @@ export class EventPoller {
       } catch { /* skip */ }
     }
 
+    console.log(`[Poller:DEBUG] pollMyPosts got ${items.length} items, seenTids=${this.seenPostTids.size}, trackTids=${this.trackTids.size}`);
     for (const item of items) {
       if (!item.tid) continue;
       this.cacheNormalizedItem(item);
-      if (!this.seenPostTids.has(item.tid)) {
+      const isNew = !this.seenPostTids.has(item.tid);
+      console.log(`[Poller:DEBUG] item tid=${item.tid?.slice(0,16)}, isNew=${isNew}`);
+      if (isNew) {
         this.markSeenTid(item.tid);
         this.trackTids.add(item.tid);
         const event = buildPostEvent(item, selfId);
+        console.log(`[Poller:DEBUG] publishing event type=${event.post_type}`);
         await this.hub.publish(event);
+        console.log(`[Poller:DEBUG] publish done, subscribers=${this.hub.subscriberCount()}`);
       }
     }
 
@@ -748,14 +753,18 @@ export class EventPoller {
       if (Array.isArray(v)) { rawComments.push(...(v as Record<string, unknown>[])); break; }
     }
 
+    console.log(`[Poller:DEBUG] pollComments tid=${tid.slice(0,8)} got ${rawComments.length} comments`);
     if (rawComments.length > 0) {
       for (const raw of rawComments) {
         const comment = normalizeComment(raw);
         if (!comment.commentId) continue;
         if (!this.seenCommentIds.has(tid)) this.seenCommentIds.set(tid, new Set());
-        if (!this.seenCommentIds.get(tid)!.has(comment.commentId)) {
+        const isNew = !this.seenCommentIds.get(tid)!.has(comment.commentId);
+        console.log(`[Poller:DEBUG] comment id=${comment.commentId.slice(0,16)}, isNew=${isNew}`);
+        if (isNew) {
           this.seenCommentIds.get(tid)!.add(comment.commentId);
           const event = buildCommentEvent(comment, selfUin, tid, selfUin);
+          console.log(`[Poller:DEBUG] publishing comment event`);
           await this.hub.publish(event);
         }
       }
