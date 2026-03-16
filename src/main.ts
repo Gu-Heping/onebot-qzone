@@ -169,6 +169,9 @@ async function main(): Promise<void> {
   app.start();
   network.start();
   poller.start();
+  log('INFO',
+    `事件监听: 说说=${config.emitMessageEvents} 评论=${config.emitCommentEvents} 点赞=${config.emitLikeEvents} 好友动态=${config.emitFriendFeedEvents} | 轮询源=${config.eventPollSource || 'auto'} 间隔=${config.pollInterval}s`,
+  );
 
   // Graceful shutdown
   const shutdown = async () => {
