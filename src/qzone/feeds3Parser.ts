@@ -72,8 +72,10 @@ function preprocessHtml(text: string): {
   // 3. 清理多余的空白字符（保留结构需要的）
   processed = processed.replace(/>\s+</g, '><');
 
-  // 4. 处理 data-pickey 中可能的转义
-  processed = processed.replace(/\\x22/g, '"').replace(/\\x3C/g, '<').replace(/\\x3E/g, '>').replace(/\\\//g, '/');
+  // 4. 处理 JS 转义序列：\\\\/ -> /，\\x27 -> '
+  // '\\\\\\\\/' (4 backslashes) creates regex \\\/ which matches \\
+  processed = processed.replace(new RegExp('\\\\\\\\/', 'g'), '/')
+    .replace(new RegExp('\\\\x27', 'g'), "'");
 
   const duration = Date.now() - startTime;
   log('DEBUG', `preprocessHtml: ${originalLength} -> ${processed.length} chars, ${replacements} replacements, ${duration}ms`);
@@ -155,20 +157,21 @@ export function parseFeeds3Items(
   interface FeedBlock { opuin: string; appid: string; typeid: string; timestamp: number; block: string; }
   const feedBlocks: FeedBlock[] = [];
   let fb: RegExpExecArray | null;
-  while ((fb = feedIdPat.exec(text)) !== null) {
+  while ((fb = feedIdPat.exec(processedText)) !== null) {
     feedBlocks.push({
       opuin: fb[1]!, appid: fb[2]!, typeid: fb[3]!,
       timestamp: parseInt(fb[4]!, 10), block: fb[5]!,
     });
   }
 
-  const contentPat = /class="txt-box-title[^"]*"[^>]*>([\s\S]*?)<\/p>/;
+  // 匹配内容区域：txt-box-title 或 txt-box
+  const contentPat = /class="txt-box(?:-title)?[^"]*"[^>]*>([\s\S]*?)(?:<\/p>|<\/div>)/;
   const contentPatAlt = /class="txt-box\s[^"]*"[^>]*>([\s\S]*?)(?:<div\s+class="f-single-foot|<div\s+class="f-ct-b|<\/li>)/;
   const nicknamePat = /class="f-name[^"]*"[^>]*>([\s\S]*?)<\/a>/;
   const cmtnumPat = /class="f-ct[^"]*"[^>]*>(\d+)/;
 
   let fdm: RegExpExecArray | null;
-  while ((fdm = feedDataPat.exec(text)) !== null) {
+  while ((fdm = feedDataPat.exec(processedText)) !== null) {
     const attrs = fdm[1]!;
     const tid = dataAttr(attrs, 'tid');
     const dataUin = dataAttr(attrs, 'uin');
@@ -185,7 +188,7 @@ export function parseFeeds3Items(
     let matchedBlock: FeedBlock | undefined;
     let closestDist = Infinity;
     for (const blk of feedBlocks) {
-      const blkStart = text.indexOf(`id="feed_${blk.opuin}_${blk.appid}_${blk.typeid}_${blk.timestamp}_`);
+      const blkStart = processedText.indexOf(`id="feed_${blk.opuin}_${blk.appid}_${blk.typeid}_${blk.timestamp}_`);
       if (blkStart >= 0 && blkStart < fdPos) {
         const dist = fdPos - blkStart;
         if (dist < closestDist) {
@@ -199,8 +202,8 @@ export function parseFeeds3Items(
     if (filterUin && (!matchedBlock || matchedBlock.opuin !== filterUin)) continue;
     if (filterAppid && matchedBlock && matchedBlock.appid !== filterAppid) continue;
 
-    const searchAfter = text.substring(fdPos, Math.min(fdPos + 5000, text.length));
-    const searchBefore = text.substring(Math.max(0, fdPos - 5000), fdPos);
+    const searchAfter = processedText.substring(fdPos, Math.min(fdPos + 5000, processedText.length));
+    const searchBefore = processedText.substring(Math.max(0, fdPos - 5000), fdPos);
 
     let content = '';
     let nickname = '';
@@ -212,6 +215,7 @@ export function parseFeeds3Items(
     const blockTypeid = matchedBlock?.typeid ?? '';
     // 转发检测：优先检查 typeid=5，同时检查 origTid 差异
     const isForward = blockTypeid === '5' || !!(origTid && origTid !== tid && origUin && origUin !== dataUin);
+
     let rt_tid = '';
     let rt_uin = '';
     let rt_uinname = '';
@@ -259,12 +263,20 @@ export function parseFeeds3Items(
           rt_uin = origUin || dataUin;
           content = fwdContent;
         } else if (sections.length === 2) {
-          const rawText = rawHtml.replace(/<[^>]+>/g, '').replace(/&nbsp;/gi, ' ')
+          // 转发者没有添加评论，只有原始作者的内容
+          const origSection = sections[1]!;
+          const origNickMatch = origSection.match(/>([^<]+)<\/a>/);
+          rt_uinname = origNickMatch ? origNickMatch[1]!.trim() : '';
+
+          const origTextClean = origSection
+            .replace(/<[^>]+>/g, '').replace(/&nbsp;/gi, ' ')
             .replace(/\\[trn]/g, '').replace(/[\t\r\n]+/g, ' ').trim();
-          const colonIdx = rawText.indexOf('：');
-          content = colonIdx >= 0 ? rawText.substring(colonIdx + 1).trim() : rawText;
+          const origColonIdx = origTextClean.indexOf('：');
+          rt_con = origColonIdx >= 0 ? origTextClean.substring(origColonIdx + 1).trim() : origTextClean;
+
           rt_tid = origTid || '';
           rt_uin = origUin || '';
+          content = ''; // 转发者没有添加内容
         }
       } else {
         const rawText = rawHtml.replace(/<[^>]+>/g, '').replace(/&nbsp;/gi, ' ')
@@ -366,8 +378,9 @@ export function parseFeeds3Items(
         const songNameM = searchAll.match(/<h4[^>]+class="[^"]*txt-box-title[^"]*"[^>]*>[\s\S]*?<a[^>]*>([^<]+)<\/a>/i);
         // 提取歌手名：<a class="f-name info state ellipsis-two">{歌手名}</a>
         const artistNameM = searchAll.match(/<a[^>]+class="[^"]*f-name[^"]*info[^"]*"[^>]*>([^<]+)<\/a>/i);
-        // 提取封面图：<img trueSrc="{封面URL}">（JS 延迟加载）
-        const coverM = searchAll.match(/<img[^>]+trueSrc="([^"]+)"/i);
+        // 提取封面图：<img trueSrc="{封面URL}"> 或 trueSrc:'{封面URL}'（JS 延迟加载）
+        const coverM = searchAll.match(/<img[^>]+trueSrc=["']([^"']+)["']/i)
+          ?? searchAll.match(/trueSrc:['"]([^'"]+)['"]/i);
         // 提取播放链接：<a href="{播放链接}"> 在 img-box 内
         const playUrlM = searchAll.match(/<div[^>]+class="[^"]*img-box[^"]*"[^>]*>[\s\S]*?<a[^>]+href="([^"]+)"/i);
 
