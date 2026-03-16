@@ -57,7 +57,8 @@ export function extractImages(pics: unknown): string[] {
       let found = false;
       for (const key of ['url2', 'url3', 'url1', 'smallurl', 'url']) {
         const v = obj[key];
-        if (typeof v === 'string' && v) { urls.push(v); found = true; break; }
+        // 只接受有效的 URL（以 http 开头）
+        if (typeof v === 'string' && v.startsWith('http')) { urls.push(v); found = true; break; }
       }
       if (!found) {
         // fallback: any string-valued url-like key
@@ -65,7 +66,7 @@ export function extractImages(pics: unknown): string[] {
           if (typeof v === 'string' && v.startsWith('http')) { urls.push(v); break; }
         }
       }
-    } else if (typeof p === 'string') {
+    } else if (typeof p === 'string' && p.startsWith('http')) {
       urls.push(p);
     }
   }
@@ -75,6 +76,9 @@ export function extractImages(pics: unknown): string[] {
 /**
  * 从说说的 video 字段提取视频播放 URL（url3）和封面（url1/pic_url）。
  * 参照 astrbot_plugin_qzone parser.py 的视频提取逻辑。
+ * 兼容两种格式：
+ *   - emotion_cgi_msglist_v6: { url3, pic_url, url1, cover }
+ *   - feeds3Parser: { videoUrl, coverUrl, videoId }
  */
 export function extractVideos(raw: Record<string, unknown>): { videoUrls: string[]; videoCoverUrls: string[] } {
   const videoUrls: string[] = [];
@@ -82,9 +86,14 @@ export function extractVideos(raw: Record<string, unknown>): { videoUrls: string
   const videos = raw['video'] as Array<Record<string, unknown>> | undefined;
   if (!Array.isArray(videos)) return { videoUrls, videoCoverUrls };
   for (const v of videos) {
-    const playUrl = String(v['url3'] ?? v['video_url'] ?? v['url'] ?? '');
+    // 兼容两种字段命名
+    const playUrl = String(
+      v['url3'] ?? v['video_url'] ?? v['url'] ?? v['videoUrl'] ?? ''
+    );
     if (playUrl) videoUrls.push(playUrl);
-    const coverUrl = String(v['url1'] ?? v['pic_url'] ?? v['cover'] ?? '');
+    const coverUrl = String(
+      v['url1'] ?? v['pic_url'] ?? v['cover'] ?? v['coverUrl'] ?? ''
+    );
     if (coverUrl) videoCoverUrls.push(coverUrl);
   }
   return { videoUrls, videoCoverUrls };
@@ -159,7 +168,7 @@ export function normalizeEmotion(raw: Record<string, unknown>, selfUin: string):
     ));
   }
 
-  const createdTime = safeInt(raw['createTime'] ?? raw['created_time'] ?? raw['ctime'] ?? raw['pubtime'] ?? 0);
+  const createdTime = safeInt(raw['created_time'] ?? raw['ctime'] ?? raw['pubtime'] ?? 0);
   const cmtnum = safeInt(raw['cmtnum'] ?? raw['commentcnt'] ?? 0);
   const fwdnum = safeInt(raw['fwdnum'] ?? raw['forwardcnt'] ?? 0);
   let pics: string[] = extractImages(raw['pic'] ?? raw['media'] ?? []);
