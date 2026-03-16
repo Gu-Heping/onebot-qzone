@@ -64,6 +64,18 @@ QQ空间 → OneBot v11 协议桥接服务（TypeScript 原生实现）。
 - 想让缓存里人多一点：设置 `QZONE_FRIEND_FEEDS3_PAGES=10`（默认 8，最多 20），会多翻几页动态再抽人。
 - 要**全量好友**：设置 `QZONE_FRIEND_PLAYWRIGHT=1`，用浏览器打开好友管理页抓取并写入缓存（需本机有 Chrome/Edge）。
 
+### OpenClaw 工作区约定（feeds / posts 分工）
+
+与 [OpenClaw](https://github.com/openclaw/openclaw) 配合时，工作区 `memory/qzone/` 建议采用以下约定，避免工具混用与内容冲突：
+
+| 用途 | 路径/接口 | 约定 |
+|------|-----------|------|
+| **今日是否已发说说** | `memory/qzone/feeds/{今日日期}.md` | 仅用于判断（看 `[发布]` 或 `[状态]`）；**不**存今日动态流水，**不**作检索内容源。 |
+| **说说存档与灵感** | `memory/qzone/posts/self/`、`posts/friends/{uin}/` | 仅同步脚本写入；Agent 用 `memory_search` 或按路径读。**不**用于判断今日是否已发。 |
+| **当次好友动态** | 接口 `get_emotion_list` / `get_friend_feeds` | Agent 当次调用结果**仅当次使用**，**不写回** feeds。 |
+
+同步脚本（如 OpenClaw 侧的 `qzone-sync-posts.js`）可调用本桥接的 `get_emotion_list` 写入 `posts/self/`，再根据是否有今日帖子写 `feeds/{今日}.md` 的 `[状态]`；若 feeds 文件已含 `[发布]` 则保留不覆盖。详见 OpenClaw 工作区内的 `QZONE.md`、`memory/qzone/README.md`。
+
 ---
 
 ## 快速开始
