@@ -1570,33 +1570,48 @@ export class QzoneClient {
    */
   async getFriendFeeds(cursor = '', num = 50): Promise<ApiResponse> {
     this.requireLogin();
+    const EXCLUDED_APPIDS = new Set(['217']);
+    const want = Math.max(1, Math.min(200, num));
+    const seenTids = new Set<string>();
+    const merged: Record<string, unknown>[] = [];
+    let nextCursor = cursor;
+    const maxRounds = 20;
+
     try {
-      const want = Math.max(1, Math.min(200, num));
-      const text = await this.fetchFeeds3Html(
-        this.qqNumber!, true, 0, 20, cursor,
-        undefined, 'all', 'all',
-      );
-      const friends = this.extractFriendsFromFeeds3FromText(text);
-      if (friends.length) this.mergeFriendCache(friends);
+      for (let round = 0; round < maxRounds && merged.length < want; round++) {
+        const text = await this.fetchFeeds3Html(
+          this.qqNumber!, true, 0, 20, nextCursor,
+          undefined, 'all', 'all',
+        );
+        const friends = this.extractFriendsFromFeeds3FromText(text);
+        if (friends.length) this.mergeFriendCache(friends);
 
-      // 检查是否还有更多（main.hasMoreFeeds）
-      const hasMore = !/hasMoreFeeds\s*:\s*false/.test(text);
-      const nextCursor = hasMore ? _extractExternparam(text) : '';
+        const hasMore = !/hasMoreFeeds\s*:\s*false/.test(text);
+        const pageCursor = hasMore ? _extractExternparam(text) : '';
 
-      // cursor 不推进 → 真到末尾
-      if (cursor && nextCursor === cursor) {
-        log('DEBUG', 'getFriendFeeds: cursor unchanged, marking end of feed');
-        return { code: 0, message: 'ok (end of feed)', msglist: [], next_cursor: '' };
+        if (nextCursor && pageCursor === nextCursor) {
+          log('DEBUG', 'getFriendFeeds: cursor unchanged, end of feed');
+          break;
+        }
+        nextCursor = pageCursor;
+
+        const all = this.parseFeeds3Items(text, undefined, undefined, want - merged.length, false);
+        for (const item of all) {
+          if (EXCLUDED_APPIDS.has(String(item['appid'] ?? ''))) continue;
+          const tid = String(item['tid'] ?? item['cellid'] ?? '');
+          if (tid && seenTids.has(tid)) continue;
+          if (tid) seenTids.add(tid);
+          merged.push(item);
+          this.cachePostMetaFromRaw(item);
+        }
+        log('DEBUG', `getFriendFeeds: round ${round + 1} got ${all.length} raw → ${merged.length} merged, hasMore=${hasMore}`);
+
+        if (!hasMore || merged.length >= want) break;
       }
 
-      // 过滤：排除纯活动记录（appid=217 = 好友点赞动态），保留说说/应用分享等
-      // appid=311 原创说说，2100=网易云，2160=QQ音乐，2=相册，3168=B站 等均放行
-      const EXCLUDED_APPIDS = new Set(['217']);
-      const all = this.parseFeeds3Items(text, undefined, undefined, want, false);
-      const msglist = all.filter(item => !EXCLUDED_APPIDS.has(String(item['appid'] ?? '')));
-      for (const item of msglist) this.cachePostMetaFromRaw(item);
-      log('DEBUG', `getFriendFeeds: scope=0 found ${all.length} total → ${msglist.length} posts (excl. activity), hasMore=${hasMore}`);
-      return { code: 0, message: 'ok', msglist: msglist.slice(0, want), next_cursor: nextCursor };
+      const msglist = merged.slice(0, want);
+      log('DEBUG', `getFriendFeeds: scope=0 total ${msglist.length} posts (excl. activity), next_cursor=${nextCursor || '(end)'}`);
+      return { code: 0, message: 'ok', msglist, next_cursor: nextCursor };
     } catch (exc) {
       log('ERROR', `friend feeds 获取失败: ${exc}`);
       return { code: -1, message: String(exc), msglist: [] };

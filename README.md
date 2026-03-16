@@ -127,6 +127,30 @@ npm run build
 node dist/main.js
 ```
 
+### 通过日志查看事件监听状态
+
+启动后日志会打印一行 **事件监听** 配置，例如：
+
+```
+[INFO] 事件监听: 说说=true 评论=true 点赞=true 好友动态=false | 轮询源=auto 间隔=60s
+```
+
+- **说说/评论/点赞/好友动态**：对应 `ONEBOT_EMIT_MESSAGE_EVENTS`、`ONEBOT_EMIT_COMMENT_EVENTS`、`ONEBOT_EMIT_LIKE_EVENTS`、`ONEBOT_EMIT_FRIEND_FEED_EVENTS`（未设时默认：前三项 true，好友动态 false）。
+- **轮询源**：`ONEBOT_EVENT_POLL_SOURCE`（`pc` / `mobile` / `auto`）。
+- **间隔**：`ONEBOT_POLL_INTERVAL`（秒）。
+
+若开启了 debug（如提交中的 `[Poller:DEBUG]`），还可通过以下关键字在日志中确认事件是否在推送：
+
+| 关键字 | 含义 |
+|--------|------|
+| `[Poller:DEBUG] pollMyPosts got N items` | 主轮询拉到的说说条数 |
+| `[Poller:DEBUG] publishing event type=` | 正在向 hub 推送事件 |
+| `[Poller:DEBUG] publish done, subscribers=N` | 推送完成，当前订阅数（WS/HTTP 连接数） |
+| `[Poller:DEBUG] pollComments` / `publishing comment event` | 评论轮询与评论事件推送 |
+| `HTTP/WS 服务器启动: http://...` | 服务已监听，可接收 WS 连接 |
+
+- **systemd**：`journalctl -u onebot-qzone -f` 实时看日志；若服务将 stdout 重定向到文件，则直接 `grep 事件监听` 或 `grep Poller` 该文件。
+
 ---
 
 ## 如何登录
