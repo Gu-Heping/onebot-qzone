@@ -26,6 +26,22 @@ export function isSafeUrl(rawUrl: string): boolean {
   } catch { return false; }
 }
 
+/** QZone CDN 图片 URL 白名单（仅允许这些域名用于带 Cookie 拉取，避免 SSRF） */
+const QZONE_IMAGE_HOST_SUFFIXES = [
+  'qpic.cn',
+  'photo.store.qq.com',
+  'qzonestyle.gtimg.cn',
+];
+
+export function isQzoneImageUrl(rawUrl: string): boolean {
+  try {
+    const u = new URL(rawUrl);
+    if (!['http:', 'https:'].includes(u.protocol)) return false;
+    const host = u.hostname.toLowerCase();
+    return QZONE_IMAGE_HOST_SUFFIXES.some(suffix => host === suffix || host.endsWith('.' + suffix));
+  } catch { return false; }
+}
+
 // ──────────────────────────────────────────────
 // CQ code parser
 // ──────────────────────────────────────────────
@@ -88,6 +104,9 @@ function formatTimestampToReadable(ts: number): string {
   return d.toISOString().replace('T', ' ').slice(0, 16);
 }
 
+const MAX_IMAGE_DATA_PER_POST = 5;
+const MAX_IMAGE_DATA_PER_RESPONSE = 20;
+
 /** 为 get_emotion_list 返回的 msglist 中每条补充 createTime/createTime2（便于 AI/客户端展示，避免仅显示时间戳） */
 function ensureReadableTimeOnMsglist(res: Record<string, unknown>): void {
   const msglist = (res['msglist'] ?? (res['data'] as Record<string, unknown>)?.msglist) as Record<string, unknown>[] | undefined;
@@ -98,6 +117,15 @@ function ensureReadableTimeOnMsglist(res: Record<string, unknown>): void {
     if (!item['createTime2']) item['createTime2'] = formatTimestampToReadable(ts);
     if (!item['createTime'] || String(item['createTime']).match(/^\d+$/)) item['createTime'] = formatTimestampToReadable(ts);
   }
+}
+
+/** 从 pic 项解析出 URL（支持 { url } 或 字符串） */
+function getPicUrl(entry: unknown): string | null {
+  if (typeof entry === 'string' && entry.startsWith('http')) return entry;
+  if (entry && typeof entry === 'object' && typeof (entry as Record<string, unknown>)['url'] === 'string') {
+    return (entry as Record<string, unknown>)['url'] as string;
+  }
+  return null;
 }
 
 // ──────────────────────────────────────────────
@@ -346,7 +374,13 @@ export class ActionHandler {
     const num = Math.max(1, Math.min(200, safeInt(p['num'] ?? 50)));
     const maxPages = Math.max(1, Math.min(30, safeInt(p['max_pages'] ?? p['pages'] ?? 15)));
     const res = await this.client.getEmotionList(uin, pos, num, undefined, undefined, undefined, maxPages);
-    if (res && typeof res === 'object') ensureReadableTimeOnMsglist(res as Record<string, unknown>);
+    if (res && typeof res === 'object') {
+      ensureReadableTimeOnMsglist(res as Record<string, unknown>);
+      const includeImageData = p['include_image_data'] !== false && p['include_image_data'] !== '0';
+      if (includeImageData) {
+        await this.enrichMsglistWithImageData(res as Record<string, unknown>, MAX_IMAGE_DATA_PER_POST, MAX_IMAGE_DATA_PER_RESPONSE);
+      }
+    }
     return ok(res, echo);
   }
 
@@ -590,7 +624,72 @@ export class ActionHandler {
     const cursor = typeof p['cursor'] === 'string' ? p['cursor'] : '';
     const num = Math.max(1, Math.min(200, safeInt(p['num'] ?? p['count'] ?? 50)));
     const res = await this.client.getFriendFeeds(cursor, num);
+    const includeImageData = p['include_image_data'] !== false && p['include_image_data'] !== '0';
+    if (includeImageData && res && typeof res === 'object') {
+      await this.enrichMsglistWithImageData(res as Record<string, unknown>, MAX_IMAGE_DATA_PER_POST, MAX_IMAGE_DATA_PER_RESPONSE);
+    }
     return ok(res, echo);
+  }
+
+  async action_fetch_image(p: Record<string, unknown>, echo?: string): Promise<OneBotResponse> {
+    if (!this.client.loggedIn) return fail(1401, '未登录', echo);
+    const url = typeof p['url'] === 'string' ? p['url'] : undefined;
+    const urls = Array.isArray(p['urls']) ? (p['urls'] as unknown[]).filter((u): u is string => typeof u === 'string') : undefined;
+    const list = url ? [url] : urls;
+    if (!list || list.length === 0) return fail(1400, '缺少 url 或 urls', echo);
+    for (const u of list) {
+      if (!isQzoneImageUrl(u)) return fail(1403, '仅允许 QZone CDN 白名单 URL（qpic.cn、photo.store.qq.com、qzonestyle.gtimg.cn）', echo);
+    }
+    if (list.length === 1) {
+      try {
+        const { data, contentType } = await this.client.fetchImageWithAuth(list[0]!);
+        return ok({ base64: data.toString('base64'), content_type: contentType }, echo);
+      } catch (e) {
+        return fail(1500, e instanceof Error ? e.message : String(e), echo);
+      }
+    }
+    const images: Array<{ url: string; base64?: string; content_type?: string }> = [];
+    for (const u of list) {
+      try {
+        const { data, contentType } = await this.client.fetchImageWithAuth(u);
+        images.push({ url: u, base64: data.toString('base64'), content_type: contentType });
+      } catch {
+        images.push({ url: u });
+      }
+    }
+    return ok({ images }, echo);
+  }
+
+  /** 为 msglist 中每条说说的 pic 附带 base64（仅白名单 URL），单条最多 maxPerPost 张，总 maxTotal 张 */
+  private async enrichMsglistWithImageData(
+    res: Record<string, unknown>,
+    maxPerPost: number,
+    maxTotal: number,
+  ): Promise<void> {
+    const msglist = res['msglist'] as Record<string, unknown>[] | undefined;
+    if (!Array.isArray(msglist)) return;
+    let totalFetched = 0;
+    for (const item of msglist) {
+      if (totalFetched >= maxTotal) break;
+      const pic = item['pic'] as Array<unknown> | undefined;
+      if (!Array.isArray(pic) || pic.length === 0) continue;
+      let perPost = 0;
+      for (let i = 0; i < pic.length && perPost < maxPerPost && totalFetched < maxTotal; i++) {
+        const entry = pic[i] as Record<string, unknown> | string;
+        const url = getPicUrl(entry);
+        if (!url || !isQzoneImageUrl(url)) continue;
+        try {
+          const { data, contentType } = await this.client.fetchImageWithAuth(url);
+          const obj = typeof entry === 'object' && entry ? entry : { url };
+          (obj as Record<string, unknown>)['base64'] = data.toString('base64');
+          (obj as Record<string, unknown>)['content_type'] = contentType;
+          perPost++;
+          totalFetched++;
+        } catch {
+          // 单张失败则只保留 url，不写 base64
+        }
+      }
+    }
   }
 
   // ── util ─────────────────────────────────────────

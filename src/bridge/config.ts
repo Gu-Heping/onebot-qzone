@@ -30,6 +30,8 @@ export interface BridgeConfig {
   emitFriendFeedEvents: boolean;
   eventDebug: boolean;
   eventPollSource: 'pc' | 'mobile' | 'auto';
+  /** 推送事件中是否附带图片 base64（默认 true，bot 无需再请求） */
+  attachImageDataInEvents: boolean;
 
   // Paths
   cachePath: string;
@@ -66,6 +68,7 @@ export function fromEnv(): BridgeConfig {
     eventPollSource:          (['pc', 'mobile', 'auto'].includes(e['ONEBOT_EVENT_POLL_SOURCE'] ?? '')
                                 ? e['ONEBOT_EVENT_POLL_SOURCE'] as 'pc' | 'mobile' | 'auto'
                                 : 'auto'),
+    attachImageDataInEvents:  !['0', 'false', 'no'].includes((e['ONEBOT_ATTACH_IMAGE_DATA'] ?? '1').toLowerCase()),
     cachePath:                e['QZONE_CACHE_PATH'] ?? './test_cache',
   };
 }
