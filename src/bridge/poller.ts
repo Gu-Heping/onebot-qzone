@@ -47,6 +47,18 @@ export function stripHtml(s: string): string {
   return htmlUnescape(s.replace(/<[^>]+>/g, ''));
 }
 
+/** QZone CDN 图片 host 白名单（与 actions.isQzoneImageUrl 一致，避免循环依赖） */
+const QZONE_IMAGE_HOST_SUFFIXES = ['qpic.cn', 'photo.store.qq.com', 'qzonestyle.gtimg.cn'];
+
+function isQzoneImageUrl(rawUrl: string): boolean {
+  try {
+    const u = new URL(rawUrl);
+    if (!['http:', 'https:'].includes(u.protocol)) return false;
+    const host = u.hostname.toLowerCase();
+    return QZONE_IMAGE_HOST_SUFFIXES.some(suffix => host === suffix || host.endsWith('.' + suffix));
+  } catch { return false; }
+}
+
 export function extractImages(pics: unknown): string[] {
   if (!Array.isArray(pics)) return [];
   const urls: string[] = [];
@@ -296,7 +308,13 @@ const APPID_LABELS: Record<string, string> = {
   '3168': '哔哩哔哩',
 };
 
-function buildPostEvent(item: NormalizedItem, selfId: string): OneBotEvent {
+const MAX_IMAGE_DATA_PER_EVENT = 3;
+
+async function buildPostEvent(
+  item: NormalizedItem,
+  selfId: string,
+  opts?: { client: QzoneClient; attachImageData: boolean; maxPics: number },
+): Promise<OneBotEvent> {
   const segments: Record<string, unknown>[] = [];
 
   // 第三方应用分享：前缀标签
@@ -315,7 +333,25 @@ function buildPostEvent(item: NormalizedItem, selfId: string): OneBotEvent {
     const fwdPrefix = item.forwardNickname ? `[转发自 ${item.forwardNickname}] ` : '[转发] ';
     segments.push({ type: 'text', data: { text: `\n${fwdPrefix}${item.forwardContent}` } });
   }
-  for (const url of item.pics) segments.push({ type: 'image', data: { url } });
+  if (opts?.attachImageData && opts?.client && item.pics.length > 0) {
+    let attached = 0;
+    for (const url of item.pics) {
+      if (attached >= opts.maxPics) break;
+      if (!isQzoneImageUrl(url)) {
+        segments.push({ type: 'image', data: { url } });
+        continue;
+      }
+      try {
+        const { data } = await opts.client.fetchImageWithAuth(url);
+        segments.push({ type: 'image', data: { url, file: 'base64://' + data.toString('base64') } });
+        attached++;
+      } catch {
+        segments.push({ type: 'image', data: { url } });
+      }
+    }
+  } else {
+    for (const url of item.pics) segments.push({ type: 'image', data: { url } });
+  }
   if (item.videos) {
     for (const url of item.videos) segments.push({ type: 'video', data: { url } });
   }
@@ -704,7 +740,11 @@ export class EventPoller {
       if (isNew) {
         this.markSeenTid(item.tid);
         this.trackTids.add(item.tid);
-        const event = buildPostEvent(item, selfId);
+        const event = await buildPostEvent(item, selfId, {
+          client: this.client,
+          attachImageData: this.config.attachImageDataInEvents,
+          maxPics: MAX_IMAGE_DATA_PER_EVENT,
+        });
         this.logEventDebug(`[Poller:DEBUG] publishing event type=${event.post_type}`);
         await this.hub.publish(event);
         this.logEventDebug(`[Poller:DEBUG] publish done, subscribers=${this.hub.subscriberCount()}`);
@@ -727,7 +767,11 @@ export class EventPoller {
         const key = `${item.uin}_${item.tid}`;
         if (!this.seenPostTids.has(key)) {
           this.markSeenTid(key);
-          const event = buildPostEvent(item, selfId);
+          const event = await buildPostEvent(item, selfId, {
+            client: this.client,
+            attachImageData: this.config.attachImageDataInEvents,
+            maxPics: MAX_IMAGE_DATA_PER_EVENT,
+          });
           (event as Record<string, unknown>)['_from_friend'] = true;
           await this.hub.publish(event);
         }

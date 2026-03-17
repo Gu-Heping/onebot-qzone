@@ -136,6 +136,7 @@ node dist/main.js
 ```
 
 - **说说/评论/点赞/好友动态**：对应 `ONEBOT_EMIT_MESSAGE_EVENTS`、`ONEBOT_EMIT_COMMENT_EVENTS`、`ONEBOT_EMIT_LIKE_EVENTS`、`ONEBOT_EMIT_FRIEND_FEED_EVENTS`（未设时默认：前三项 true，好友动态 false）。
+- **推送事件中附带图片 base64**：`ONEBOT_ATTACH_IMAGE_DATA`（默认 1；设为 0 关闭）。
 - **轮询源**：`ONEBOT_EVENT_POLL_SOURCE`（`pc` / `mobile` / `auto`）。
 - **间隔**：`ONEBOT_POLL_INTERVAL`（秒）。
 
@@ -252,7 +253,7 @@ QZONE_PLAYWRIGHT_HEADLESS=1 npm run dev
 | `send_msg` / `send_private_msg` | 发布说说 | `message`（支持 CQ 码图片）；@ 人用 `@{uin:QQ号,nick:昵称}` |
 | `delete_msg` | 删除说说 | `message_id` |
 | `get_msg` | 获取说说详情 | `user_id`, `message_id` |
-| `get_emotion_list` | 获取说说列表 | `user_id`, `pos`, `num` |
+| `get_emotion_list` | 获取说说列表 | `user_id`, `pos`, `num`；默认附带图片 base64（`include_image_data=false` 可关闭） |
 | `send_comment` | 发送评论 | `target_uin`, `target_tid`, `content` |
 | `delete_comment` | 删除评论 | `uin`, `tid`, `comment_id` |
 | `get_comment_list` | 获取评论列表 | `user_id`, `tid` |
@@ -275,14 +276,17 @@ QZONE_PLAYWRIGHT_HEADLESS=1 npm run dev
 | `get_traffic_data` | 获取说说流量统计 | `user_id`, `tid` |
 | `set_emotion_privacy` | 设置说说隐私 | `tid`, `privacy`（`private`/`public`） |
 | `get_portrait` | 获取头像和昵称 | `user_id` |
-| `get_friend_feeds` | 获取好友最近说说（游标分页） | `cursor`（可选，首页不传，续页传上次的 `next_cursor`）、`num`/`count`；仅返回 appid=311 说说 |
+| `get_friend_feeds` | 获取好友最近说说（游标分页） | `cursor`、`num`/`count`；默认附带图片 base64（`include_image_data=false` 可关闭）；仅返回 appid=311 说说 |
 | `get_album_list` | 获取相册列表 | `user_id`（可选） |
 | `get_photo_list` | 获取照片列表 | `album_id` |
 | `upload_image` | 上传图片 | `base64` 或 `url` |
+| `fetch_image` | 使用桥接 Cookie 拉取 QZone 图片（返回 base64） | `url` 或 `urls`；仅接受白名单域名（qpic.cn、photo.store.qq.com、qzonestyle.gtimg.cn），边缘场景用 |
 | `probe_api_routes` | 探测可用接口路由 | `uin`, `tid` |
 | `reset_api_caches` | 清除接口缓存 | — |
 | `login_cookie` | Cookie 登录 | `cookie` |
 | `logout` | 退出登录 | — |
+
+**说说图片与 base64**：默认情况下，`get_emotion_list` / `get_friend_feeds` 会在每条说说的 `pic` 项中附带 `base64`（桥接用 Cookie+Referer 向 QZone CDN 拉取），单条最多 5 张、单次响应最多 20 张；传 `include_image_data=false` 可关闭以省流量。推送的新说说事件中也会默认附带图片 base64（`message` 中 image 段带 `file: 'base64://...'`），可通过环境变量 `ONEBOT_ATTACH_IMAGE_DATA=0` 关闭。单独拉取某张图时可用 `fetch_image`（参数 `url` 或 `urls`），仅接受白名单域名。
 
 ---
 

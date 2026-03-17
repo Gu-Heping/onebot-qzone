@@ -357,6 +357,32 @@ export class QzoneClient {
   }
 
   /**
+   * 使用当前 Cookie + Referer 拉取图片（用于 QZone CDN 需鉴权的 URL）。
+   * 仅应在白名单 URL 上调用，避免 SSRF。
+   */
+  async fetchImageWithAuth(url: string): Promise<{ data: Buffer; contentType: string }> {
+    const options: AxiosRequestConfig = {};
+    if (this.cookies && Object.keys(this.cookies).length > 0) {
+      const cookieStr = Object.entries(this.cookies)
+        .map(([k, v]) => `${k}=${v}`)
+        .join('; ');
+      if (cookieStr) options.headers = { ...options.headers, Cookie: cookieStr };
+    }
+    options.headers = { ...options.headers, Referer: 'https://user.qzone.qq.com/' };
+    options.responseType = 'arraybuffer';
+    const resp = await this.http.request({ method: 'GET', url, ...options });
+    this._syncMapFromJar();
+    const data = Buffer.from(resp.data as ArrayBuffer);
+    if (resp.status !== 200 || data.length === 0) {
+      throw new Error(`fetchImageWithAuth: ${resp.status} or empty body`);
+    }
+    const contentType = (resp.headers && resp.headers['content-type'])
+      ? String(resp.headers['content-type']).split(';')[0]!.trim()
+      : 'image/jpeg';
+    return { data, contentType };
+  }
+
+  /**
    * 增强型请求：自动 JSONP 解壳 + 反爬检测 + 可选 Zod 校验
    */
   async requestParsed(
