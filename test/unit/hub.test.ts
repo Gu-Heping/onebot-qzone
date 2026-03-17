@@ -44,11 +44,11 @@ const cases: TestCase[] = [
     name: 'publish 单回调异常不阻断其他',
     fn: async () => {
       const hub = new EventHub();
-      let ok = false;
+      let ok: boolean = false;
       hub.subscribe(() => { throw new Error('boom'); });
       hub.subscribe(() => { ok = true; });
       await hub.publish({ type: 'err' });
-      assert(ok === true, '第二个回调应正常执行');
+      assert(ok, '第二个回调应正常执行');
     },
   },
   {

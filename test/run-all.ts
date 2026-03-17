@@ -52,8 +52,8 @@ async function runUnitSuites(): Promise<SuiteResult[]> {
 async function checkServerReachable(): Promise<boolean> {
   try {
     const r = await fetch(`${BASE}/get_version_info`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
-    const j = await r.json();
-    return j && j.status === 'ok';
+    const j = (await r.json()) as { status?: string };
+    return Boolean(j?.status === 'ok');
   } catch {
     return false;
   }
