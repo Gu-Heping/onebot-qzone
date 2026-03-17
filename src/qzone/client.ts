@@ -373,6 +373,15 @@ export class QzoneClient {
     const resp = await this.http.request({ method: 'GET', url, ...options });
     this._syncMapFromJar();
     const data = Buffer.from(resp.data as ArrayBuffer);
+    // #region agent log
+    if (resp.status !== 200 || data.length === 0) {
+      const payload = { location: 'client.ts:fetchImageWithAuth', message: 'non-200 or empty', data: { status: resp.status, dataLen: data.length, urlPrefix: url.slice(0, 70) }, timestamp: Date.now(), hypothesisId: 'H4' as const };
+      try {
+        fs.appendFileSync(path.join(this.config.cachePath, 'debug.log'), JSON.stringify(payload) + '\n');
+      } catch (_) {}
+      fetch('http://127.0.0.1:7242/ingest/8be6e162-8615-4320-91d6-a9ff0807a9c9', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }).catch(() => {});
+    }
+    // #endregion
     if (resp.status !== 200 || data.length === 0) {
       throw new Error(`fetchImageWithAuth: ${resp.status} or empty body`);
     }
@@ -1488,6 +1497,13 @@ export class QzoneClient {
    */
   async getFriendFeeds(cursor = '', num = 50): Promise<ApiResponse> {
     this.requireLogin();
+    // #region agent log
+    const loginUin = this.qqNumber ?? '';
+    try {
+      const payload = { location: 'client.ts:getFriendFeeds', message: 'request params', data: { scope: 0, requestUinMasked: loginUin ? `${loginUin.slice(0, -2)}**` : '', cursorLen: cursor.length }, timestamp: Date.now(), hypothesisId: 'H5' as const };
+      fs.appendFileSync(path.join(this.config.cachePath, 'debug.log'), JSON.stringify(payload) + '\n');
+    } catch (_) {}
+    // #endregion
     const EXCLUDED_APPIDS = new Set(['217']);
     const want = Math.max(1, Math.min(200, num));
     const seenTids = new Set<string>();
@@ -1528,6 +1544,13 @@ export class QzoneClient {
       }
 
       const msglist = merged.slice(0, want);
+      // #region agent log
+      const authors = msglist.slice(0, 5).map((m) => ({ uin: m['uin'], opuin: m['opuin'], tid: m['tid'] }));
+      const isSelf = loginUin && authors.some((a) => String(a.uin ?? a.opuin ?? '') === loginUin);
+      try {
+        fs.appendFileSync(path.join(this.config.cachePath, 'debug.log'), JSON.stringify({ location: 'client.ts:getFriendFeeds', message: 'msglist authors', data: { total: msglist.length, authors, loginUinMasked: loginUin ? `${loginUin.slice(0, -2)}**` : '', isAllSelf: isSelf }, timestamp: Date.now(), hypothesisId: 'H5' }) + '\n');
+      } catch (_) {}
+      // #endregion
       log('DEBUG', `getFriendFeeds: scope=0 total ${msglist.length} posts (excl. activity), next_cursor=${nextCursor || '(end)'}`);
       return { code: 0, message: 'ok', msglist, next_cursor: nextCursor };
     } catch (exc) {
