@@ -10,7 +10,7 @@ import { preprocessHtml } from './preprocess.js';
 import { extractFeedContentFromHtml } from './content.js';
 
 // #region agent log
-const DEBUG_LOG_PATH = path.join(process.cwd(), '.cursor', 'debug.log');
+const DEBUG_LOG_PATH = path.join(process.env.QZONE_CACHE_PATH ?? process.cwd(), 'debug.log');
 function debugIngest(message: string, data: Record<string, unknown>, hypothesisId?: string): void {
   try {
     const line = JSON.stringify({
