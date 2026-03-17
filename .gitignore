@@ -5,8 +5,17 @@ dist/
 # Cache / Runtime
 cache/
 test_cache/
+test_cache_real/
 logs/
 playwright_debug.html
+bridge.log
+debug_output.txt
+latest_api_response.json
+latest_feeds_debug.json
+test.txt
+.bridge.pid
+.pid
+EOF
 
 # Env
 .env

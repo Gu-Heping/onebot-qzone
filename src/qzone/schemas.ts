@@ -36,6 +36,7 @@ export const EmotionItemSchema = z.object({
   nickname: z.string().default(''),
   created_time: z.coerce.number().default(0),
   cmtnum: z.coerce.number().default(0),
+  likenum: z.coerce.number().default(0),
   fwdnum: z.coerce.number().default(0),
   pic: z.array(EmotionPicSchema).optional().default([]),
 }).passthrough();

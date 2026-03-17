@@ -12,8 +12,6 @@ export const CACHE_TTL = {
   qzonetokenFail: 600,      // 10 min
   /** Playwright 启动失败后的冷却期 */
   playwrightFail: 1800,     // 30 min
-  /** 评论接口全部变体失败后的冷却期 */
-  commentsAllFail: 300,     // 5 min
   /** 详情接口全部变体失败后的冷却期 */
   detailAllFail: 300,       // 5 min
   /** feeds3 页面缓存有效期 */
