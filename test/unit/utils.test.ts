@@ -20,7 +20,7 @@ const cases: TestCase[] = [
     fn: () => {
       const json = '{"code":0,"msg":"ok"}';
       const out = parseJsonp(json);
-      assert(out && typeof out === 'object' && (out as any).code === 0, '应解析出 code=0');
+      assert(Boolean(out && typeof out === 'object' && (out as Record<string, unknown>).code === 0), '应解析出 code=0');
     },
   },
   {
@@ -28,14 +28,15 @@ const cases: TestCase[] = [
     fn: () => {
       const text = '_Callback({"code":0,"data":1});';
       const out = parseJsonp(text);
-      assert(out && typeof out === 'object' && (out as any).code === 0 && (out as any).data === 1, '应解析出 code=0, data=1');
+      const o = out as Record<string, unknown>;
+      assert(Boolean(out && typeof out === 'object' && o.code === 0 && o.data === 1), '应解析出 code=0, data=1');
     },
   },
   {
     name: 'parseJsonp 空/无效',
     fn: () => {
       const out = parseJsonp('');
-      assert(out && typeof out === 'object' && (out as any)._empty === true, '空串应返回 _empty');
+      assert(Boolean(out && typeof out === 'object' && (out as Record<string, unknown>)._empty === true), '空串应返回 _empty');
     },
   },
   {
