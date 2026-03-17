@@ -69,11 +69,14 @@ async function main(): Promise<void> {
 
   let allOk = true;
   let firstTid: string | null = null;
+  const emotionMsglist: Record<string, unknown>[] = [];
+  const friendMsglist: Record<string, unknown>[] = [];
 
   // ── getEmotionList ──
   try {
     const res = await client.getEmotionList(selfUin, 0, 20) as Record<string, unknown>;
     const msglist = Array.isArray(res['msglist']) ? (res['msglist'] as Record<string, unknown>[]) : [];
+    emotionMsglist.push(...msglist);
     const source = res['_source'] ?? 'pc';
     const code = res['code'];
     console.log(`getEmotionList: code=${code} _source=${source} 条数=${msglist.length}`);
@@ -100,6 +103,7 @@ async function main(): Promise<void> {
   try {
     const res = await client.getFriendFeeds('', 20) as Record<string, unknown>;
     const msglist = Array.isArray(res['msglist']) ? (res['msglist'] as Record<string, unknown>[]) : [];
+    friendMsglist.push(...msglist);
     console.log(`getFriendFeeds: 条数=${msglist.length}`);
     if (msglist.length > 0) {
       const normalized = msglist.map((r) => normalizeEmotion(r, String(r['uin'] ?? '')));
@@ -139,6 +143,41 @@ async function main(): Promise<void> {
       console.error('getLikeListBestEffort 异常:', e);
     }
   }
+
+  // ── 含图说说、多级评论、含图评论（真实数据回归）────────────────────────
+  let postsWithPic = 0;
+  let totalCommentRoot = 0;
+  let totalCommentReply = 0;
+  let commentsWithPic = 0;
+  let postsWithReplies = 0;
+
+  for (const item of [...emotionMsglist, ...friendMsglist]) {
+    const pic = item['pic'];
+    if (Array.isArray(pic) && pic.length > 0) postsWithPic++;
+  }
+
+  if (client.feeds3Comments && client.feeds3Comments.size > 0) {
+    for (const [, comments] of client.feeds3Comments) {
+      if (!Array.isArray(comments)) continue;
+      let hasReply = false;
+      for (const c of comments) {
+        if (c['is_reply'] === true) {
+          totalCommentReply++;
+          hasReply = true;
+        } else {
+          totalCommentRoot++;
+        }
+        const pic = c['pic'];
+        if (Array.isArray(pic) && pic.length > 0) commentsWithPic++;
+      }
+      if (hasReply) postsWithReplies++;
+    }
+  }
+
+  console.log('\n── 真实数据回归：含图说说 / 多级评论 / 含图评论 ──');
+  console.log(`  含图说说: ${postsWithPic} 条（getEmotionList + getFriendFeeds 中 pic 非空）`);
+  console.log(`  多级评论: 一级=${totalCommentRoot} 条，二级回复=${totalCommentReply} 条，有回复的帖子=${postsWithReplies} 个`);
+  console.log(`  含图评论: ${commentsWithPic} 条（评论带 pic 数组且长度>0）`);
 
   console.log('\n────────────────────────────');
   console.log(allOk ? '结论: 是，当前数据为人发正常动态' : '结论: 否或部分异常，请查看上方详情');

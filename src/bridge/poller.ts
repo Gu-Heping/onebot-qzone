@@ -262,6 +262,7 @@ function normalizeComment(raw: Record<string, unknown>): QzoneComment {
   const replyToNickname = raw['reply_to_nickname'] != null ? stripHtml(String(raw['reply_to_nickname'])) : (raw['replyToNickname'] != null ? stripHtml(String(raw['replyToNickname'])) : undefined);
   const replyToCommentId = raw['reply_to_comment_id'] != null ? String(raw['reply_to_comment_id']) : (raw['replyToCommentId'] != null ? String(raw['replyToCommentId']) : undefined);
   const parentCommentId = raw['parent_comment_id'] != null ? String(raw['parent_comment_id']) : (raw['parentCommentId'] != null ? String(raw['parentCommentId']) : undefined);
+  const pic = Array.isArray(raw['pic']) ? (raw['pic'] as string[]) : undefined;
   return {
     commentId, uin, nickname, content, createdTime,
     ...(isReply && { isReply: true }),
@@ -269,6 +270,7 @@ function normalizeComment(raw: Record<string, unknown>): QzoneComment {
     ...(replyToNickname && { replyToNickname }),
     ...(replyToCommentId && { replyToCommentId }),
     ...(parentCommentId && { parentCommentId }),
+    ...(pic && pic.length > 0 && { pic }),
   };
 }
 
@@ -369,6 +371,7 @@ function buildCommentEvent(comment: QzoneComment, postUin: string, postTid: stri
   if (comment.replyToNickname) ev._reply_to_nickname = comment.replyToNickname;
   if (comment.replyToCommentId) ev._reply_to_comment_id = comment.replyToCommentId;
   if (comment.parentCommentId) ev._parent_comment_id = comment.parentCommentId;
+  if (comment.pic?.length) ev._comment_pic = comment.pic;
   return ev;
 }
 

@@ -13,6 +13,8 @@
 相册列表:  cgi_list_album → cgi_list_photo
 ```
 
+feeds3 解析逻辑位于 `src/qzone/feeds3/`。
+
 ## 评论回复的特殊说明
 
 评论回复使用 `emotion_cgi_re_feeds` 接口（h5.qzone.qq.com 域），需要特别注意：

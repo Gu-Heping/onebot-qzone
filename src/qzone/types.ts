@@ -261,6 +261,8 @@ export interface QzoneComment {
   nickname: string;
   name?: string;
   content: string;
+  /** 评论中的图片 URL 列表（feeds3 解析） */
+  pic?: string[];
   createdTime: number;
   /** 格式化时间 */
   createTime?: string;

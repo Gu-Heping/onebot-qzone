@@ -333,6 +333,7 @@ npm run verify:readonly  # 端点健康检查（仅读接口）
 - **单元测试**：`test/unit/` 下 10 个测试套件，共 127 项，纯本地运行不需要登录。
 - **API 测试**：需先启动 bridge 并登录，`--readonly` 模式仅验证读接口。
 - **端点健康检查**：`scripts/verify-endpoints.ts`，启动即检验 8 个读 + 2 个写端点，输出彩色 PASS/FAIL/SKIP 报告。
+- **真实数据回归**：`npx tsx test/verify-real-feeds.ts`（需配置 Cookie）会校验 getEmotionList/getFriendFeeds、归一化结果，并输出含图说说数、多级评论（一级/二级/有回复的帖子数）、含图评论数。
 
 ### 调试获取评论
 
@@ -368,6 +369,8 @@ src/
 │   ├── utils.ts           # 工具函数（calcGtk、parseJsonp 等）
 │   ├── cookieStore.ts     # Cookie 持久化
 │   ├── client.ts          # QzoneClient 主类（登录 + 全部 API）
+│   ├── feeds3Parser.ts    # Barrel：feeds3 解析聚合导出
+│   ├── feeds3/            # feeds3 子模块（预处理/正文/说说/评论/点赞/元数据/辅助）
 │   ├── schemas.ts         # Zod 运行时校验 Schema（10 套）
 │   ├── validate.ts        # 校验入口（validateApiResponse / validateOrThrow）
 │   ├── requestLayer.ts    # 统一请求层（JSONP 拆包 / 反爬检测 / 业务码提取）
