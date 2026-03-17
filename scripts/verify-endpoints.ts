@@ -120,7 +120,7 @@ async function main() {
   // 评论列表
   await check('comment_list', 'comment_list', async () => {
     if (!firstTid) throw new Error('无可用 tid，跳过');
-    return client.getComments(selfUin, firstTid, 5);
+    return client.getCommentsBestEffort(selfUin, firstTid, 5, 0);
   });
 
   // 流量数据

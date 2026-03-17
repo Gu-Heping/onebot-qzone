@@ -53,7 +53,7 @@ export function fromEnv(): BridgeConfig {
     wsReverseApiUrls:         parseUrls(e['ONEBOT_WS_REVERSE_API_URLS'] ?? ''),
     wsReverseEventUrls:       parseUrls(e['ONEBOT_WS_REVERSE_EVENT_URLS'] ?? ''),
     wsReverseReconnectInterval: parseInt(e['ONEBOT_WS_REVERSE_RECONNECT_INTERVAL'] ?? '5', 10),
-    pollInterval:             parseInt(e['ONEBOT_POLL_INTERVAL'] ?? '60', 10),
+    pollInterval:             parseInt(e['ONEBOT_POLL_INTERVAL'] ?? '60', 10), // 新说说最多延迟此秒数被监听到，可设为 30 加快
     commentPollInterval:      parseInt(e['ONEBOT_COMMENT_POLL_INTERVAL'] ?? '120', 10),
     likePollInterval:         parseInt(e['ONEBOT_LIKE_POLL_INTERVAL'] ?? '180', 10),
     friendFeedPollInterval:   parseInt(e['ONEBOT_FRIEND_FEED_POLL_INTERVAL'] ?? '120', 10),

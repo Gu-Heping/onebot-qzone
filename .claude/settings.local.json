@@ -5,7 +5,25 @@
       "Bash(npx tsx:*)",
       "Bash(git add:*)",
       "Bash(git commit:*)",
-      "Bash(git push:*)"
+      "Bash(git push:*)",
+      "WebSearch",
+      "WebFetch(domain:qzonestyle.gtimg.cn)",
+      "Bash(curl -s \"https://qzonestyle.gtimg.cn/qzone/em/e100.gif\" -o /tmp/e100.gif && curl -s \"https://qzonestyle.gtimg.cn/qzone/em/e101.gif\" -o /tmp/e101.gif && curl -s \"https://qzonestyle.gtimg.cn/qzone/em/e102.gif\" -o /tmp/e102.gif && echo \"Downloaded\")",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:www.npmjs.com)",
+      "Bash(npm search:*)",
+      "Bash(mkdir -p /tmp/qq-emoji-check)",
+      "Read(//tmp/**)",
+      "Bash(npm pack:*)",
+      "Bash(tar -xf angular-qq-emoji-0.1.0.tgz)",
+      "Bash(find package:*)",
+      "WebFetch(domain:unpkg.com)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:api.github.com)",
+      "Bash(npx tsc:*)",
+      "Bash(node test-emoji.mjs)",
+      "Bash(npm test:*)",
+      "Bash(grep:*)"
     ]
   }
 }

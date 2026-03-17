@@ -68,10 +68,7 @@ export class QzoneClient {
   private playwrightFailTime = 0;
   private playwrightCooldown = CACHE_TTL.playwrightFail;
 
-  private commentsWinningVariant: number | null = null;
   private detailWinningVariant: number | null = null;
-  private commentsAllFailTime = 0;
-  private commentsAllFailTtl = CACHE_TTL.commentsAllFail;
   private detailAllFailTime = 0;
   private detailAllFailTtl = CACHE_TTL.detailAllFail;
 
@@ -845,9 +842,7 @@ export class QzoneClient {
     this.qzonetokenCacheTime = 0;
     this.qzonetokenFailTime = 0;
     this.playwrightFailTime = 0;
-    this.commentsWinningVariant = null;
     this.detailWinningVariant = null;
-    this.commentsAllFailTime = 0;
     this.detailAllFailTime = 0;
     this.feeds3Cache.clear();
     this.feeds3CacheTime.clear();
@@ -877,23 +872,7 @@ export class QzoneClient {
       }
     }
 
-    // 方法1: 直接用 g_tk 请求 emotion_cgi_msglist_v6（proxy-json）— 最常用 API
-    try {
-      const gtk = String(this.getGtk());
-      const url = `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_msglist_v6?uin=${this.qqNumber}&hostuin=${this.qqNumber}&num=1&pos=0&format=json&g_tk=${gtk}`;
-      const resp = await this.get(url, {
-        headers: this.pcHeaders(`https://user.qzone.qq.com/${this.qqNumber}/311`),
-      });
-      const result = parseJsonp(resp.text) as ApiResponse;
-      const code = result['code'] as number | undefined;
-      // code=0 明确成功; code=-10000 限流但 Cookie 有效; code=-2/-3/-3000 才是真失败
-      if (code === 0 || code === -10000) {
-        log('DEBUG', `validateSession: emotion_cgi_msglist_v6 OK (code=${code})`);
-        return true;
-      }
-    } catch { /* try next */ }
-
-    // 方法2: feeds3 首页请求 — 几乎不被限流
+    // 方法1: feeds3 首页请求 — 几乎不被限流
     try {
       const feeds3Url = `https://user.qzone.qq.com/${this.qqNumber}/311`;
       const resp = await this.get(feeds3Url, { headers: this.pcHeaders() });
@@ -905,7 +884,7 @@ export class QzoneClient {
       }
     } catch { /* try next */ }
 
-    // 方法3: visitor list (之前用的探针)
+    // 方法2: visitor list
     try {
       const res = await this.getVisitorList(this.qqNumber);
       if (res && !res['_empty'] && (res['code'] as number | undefined) !== -3000) {
@@ -914,7 +893,7 @@ export class QzoneClient {
       }
     } catch { /* try next */ }
 
-    // 方法4: qzonetoken (最慢，如果 Playwright 冷却中会直接跳过)
+    // 方法3: qzonetoken (最慢，如果 Playwright 冷却中会直接跳过)
     try {
       const token = await this.getQzonetoken();
       if (token) {
@@ -1265,12 +1244,14 @@ export class QzoneClient {
       text = resp.text.replace(/\\x22/g, '"').replace(/\\x3C/g, '<').replace(/\\\//g, '/');
     }
     log('DEBUG', `feeds3 decoded text length=${text.length}`);
-    // Dump to file for debug
+    // Dump to file for debug (与 dumpDebugPayload 一致：cachePath/debug)
     if (env.debugDump) {
       try {
-        const fs = await import('node:fs');
-        fs.writeFileSync(`test_cache/feeds3_${uin}_${scope}.html`, text, 'utf8');
-        log('DEBUG', `feeds3 dumped to test_cache/feeds3_${uin}_${scope}.html`);
+        const debugDir = path.join(this.config.cachePath, 'debug');
+        fs.mkdirSync(debugDir, { recursive: true });
+        const filepath = path.join(debugDir, `feeds3_${uin}_${scope}.html`);
+        fs.writeFileSync(filepath, text, 'utf8');
+        log('DEBUG', `feeds3 dumped to ${filepath}`);
       } catch {}
     }
     // LRU: delete-then-set 使 Map 保持按最近访问排序（最旧在前）
@@ -1299,102 +1280,13 @@ export class QzoneClient {
   }
 
   // ──────────────────────────────────────────────
-  // Emotion list
+  // Emotion list（仅 feeds3，PC/mobile 接口已移除）
   // ──────────────────────────────────────────────
   async getEmotionList(
-    uin?: string, pos = 0, num = 50, ftype = 0, sort = 0, replynum = 10, maxPages = 15,
+    uin?: string, pos = 0, num = 50, _ftype = 0, _sort = 0, _replynum = 10, maxPages = 15,
   ): Promise<ApiResponse> {
     this.requireLogin();
     const targetUin = uin ?? this.qqNumber!;
-    const gtk = String(this.getGtk());
-    const referer = `https://user.qzone.qq.com/${targetUin}/311`;
-
-    // 尝试获取 qzonetoken
-    let qzonetoken = '';
-    try {
-      qzonetoken = (await this.getQzonetoken()) ?? '';
-      log('DEBUG', `qzonetoken: ${qzonetoken ? qzonetoken.substring(0, 20) + '...' : '(empty)'}`);
-    } catch (e) { log('DEBUG', `qzonetoken fetch failed: ${e}`); }
-
-    // 尝试多个 URL 路径
-    const baseParams: Record<string, string> = {
-      uin: targetUin,
-      hostuin: this.qqNumber!,
-      ftype: String(ftype),
-      sort: String(sort),
-      pos: String(pos),
-      num: String(num),
-      replynum: String(replynum),
-      g_tk: gtk,
-      code_version: '1',
-      need_private_comment: '1',
-    };
-    if (qzonetoken) baseParams['qzonetoken'] = qzonetoken;
-
-    const urlVariants = [
-      // 标准 proxy 路径 (无 callback)
-      {
-        url: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_msglist_v6`,
-        params: { ...baseParams, format: 'json' },
-        headers: this.pcHeaders(referer, 'https://user.qzone.qq.com'),
-        label: 'proxy-json',
-      },
-      // 标准 proxy 路径 (JSONP with callback)
-      {
-        url: `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_msglist_v6`,
-        params: { ...baseParams, format: 'jsonp', callback: '_preloadCallback' },
-        headers: this.pcHeaders(referer, 'https://user.qzone.qq.com'),
-        label: 'proxy-jsonp',
-      },
-      // h5 路径 — 有时参与不同的限流策略
-      {
-        url: `https://h5.qzone.qq.com/proxy/domain/taotao.qq.com/cgi-bin/emotion_cgi_msglist_v6`,
-        params: { ...baseParams, format: 'json' },
-        headers: this.pcHeaders('https://h5.qzone.qq.com/', 'https://h5.qzone.qq.com'),
-        label: 'h5-json',
-      },
-    ];
-
-    for (const variant of urlVariants) {
-      try {
-        const qs = new URLSearchParams(variant.params).toString();
-        const fullUrl = `${variant.url}?${qs}`;
-        log('DEBUG', `emotion_cgi_msglist_v6 [${variant.label}] request: uin=${targetUin} pos=${pos} num=${num}`);
-        const resp = await this.get(fullUrl, { headers: variant.headers });
-        log('DEBUG', `emotion_cgi_msglist_v6 [${variant.label}] raw response (${resp.text.length} bytes): ${resp.text.substring(0, 300)}`);
-        const result = parseJsonp(resp.text) as ApiResponse;
-        if (typeof result === 'object' && result) {
-          const code = (result as ApiResponse)['code'] as number | undefined;
-          const msg = (result as ApiResponse)['message'] ?? '';
-          log('DEBUG', `emotion_cgi_msglist_v6 [${variant.label}] response code=${code} message=${msg}`);
-          // 成功
-          if (code === 0) {
-            validateApiResponse('emotion_list', result, resp.text);
-            return result;
-          }
-          // 限流/认证失败 → 试下一个 variant
-          if (code === -10000 || code === -2 || code === -3000 || this.isAuthFailure(result)) {
-            log('WARNING', `emotion_cgi_msglist_v6 [${variant.label}] 失败 (code=${code})，尝试下一种`);
-            continue;
-          }
-          // 其它错误也继续尝试
-          if (code !== undefined && code !== 0) {
-            log('WARNING', `emotion_cgi_msglist_v6 [${variant.label}] 返回错误 (code=${code})`);
-            continue;
-          }
-        }
-        // result 不是有效对象（如 HTML 403 页面），跳过
-        log('WARNING', `emotion_cgi_msglist_v6 [${variant.label}] 返回非 JSON 对象，跳过`);
-        continue;
-      } catch (exc) {
-        log('WARNING', `emotion_cgi_msglist_v6 [${variant.label}] 请求失败: ${exc}`);
-        continue;
-      }
-    }
-
-    // 所有 HTTP API variant 都失败 → 直接 feeds3 fallback
-    // NOTE: 不再启动 Playwright 浏览器拦截 API。Playwright 仅用于登录和静默续期。
-    log('WARNING', 'emotion_cgi_msglist_v6 所有路径均失败，最终使用 feeds3 fallback');
     return this.getEmotionListViaFeeds3(targetUin, num, pos, maxPages);
   }
 
@@ -1656,14 +1548,6 @@ export class QzoneClient {
     return Array.from(all.values());
   }
 
-  async getMobileMoodList(uin?: string, pos = 0, num = 20): Promise<ApiResponse> {
-    this.requireLogin();
-    const targetUin = uin ?? this.qqNumber!;
-    const url = `https://mobile.qzone.qq.com/get_mood_list?g_tk=${this.getGtk()}&uin=${targetUin}&pos=${pos}&num=${num}&format=json`;
-    const resp = await this.get(url, { headers: this.mobileHeaders() });
-    return safeDecodeJsonResponse(resp.data);
-  }
-
   async getFeedImages(uin: string, tid: string): Promise<string[]> {
     this.requireLogin();
     try {
@@ -1773,152 +1657,9 @@ export class QzoneClient {
     return -1;
   }
 
-  async getComments(
-    uin: string, tid: string, num = 20, pos = 0,
-    t1Source?: number, t1Uin?: string, t1Tid?: string,
-  ): Promise<ApiResponse> {
-    this.requireLogin();
-
-    const mobileUrl = `https://mobile.qzone.qq.com/get_comment_list?g_tk=${this.getGtk()}&uin=${uin}&cellid=${tid}&num=${num}&pos=${pos}&format=json`;
-
-    if (this.routes['comments'] === 'mobile') {
-      log('DEBUG', `getComments: 使用 mobile 路径 (routes.comments=mobile)`);
-      const resp = await this.get(mobileUrl, { headers: this.mobileHeaders() });
-      this.dumpDebugPayload('comments_mobile', resp.text);
-      const out = safeDecodeJsonResponse(resp.data);
-      log('DEBUG', `getComments(mobile): code=${(out as ApiResponse)['code']} comments≈${this.commentCount(out as ApiResponse)}`);
-      return out;
-    }
-
-    const now = Date.now() / 1000;
-    if (this.commentsAllFailTime > 0 && now - this.commentsAllFailTime < this.commentsAllFailTtl) {
-      log('DEBUG', `getComments: 在 commentsAllFail 冷却期内，直接走 mobile`);
-      const resp = await this.get(mobileUrl, { headers: this.mobileHeaders() });
-      this.dumpDebugPayload('comments_mobile', resp.text);
-      return safeDecodeJsonResponse(resp.data);
-    }
-
-    // POST
-    const postUrl = `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getcmtreply_v6?g_tk=${this.getGtk()}`;
-    const postData: Record<string, string> = {
-      uin, tid, num: String(num), pos: String(pos), format: 'json',
-      hostuin: this.qqNumber!, qzreferrer: this.getQzreferrer(),
-    };
-    if (t1Source !== undefined) postData['t1_source'] = String(t1Source);
-    if (t1Uin) postData['t1_uin'] = t1Uin;
-    if (t1Tid) postData['t1_tid'] = t1Tid;
-    try {
-      log('DEBUG', `getComments: 尝试 PC POST (t1_source=${t1Source ?? 'none'})`);
-      const resp = await this.post(postUrl, {
-        data: new URLSearchParams(postData),
-        headers: this.pcHeaders(this.getQzreferrer()),
-      });
-      this.dumpDebugPayload('comments_pc_post', resp.text);
-      const raw = resp.text.trim();
-      if (raw) {
-        const payload = parseJsonp(raw) as ApiResponse;
-        const code = payload?.['code'] as number | undefined;
-        log('DEBUG', `getComments(PC POST): code=${code} comments≈${payload ? this.commentCount(payload) : 0}`);
-        if (payload && (code === undefined || code === 0)) {
-          this.commentsWinningVariant = -1;
-          validateApiResponse('comment_list', payload, raw);
-          return payload;
-        }
-      }
-    } catch (exc) { log('DEBUG', `Comments POST failed: ${exc}`); }
-
-    // GET 变体（简化版：只保留最有效的 3 个变体）
-    const base = `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getcmtreply_v6?g_tk=${this.getGtk()}&uin=${uin}&tid=${tid}&num=${num}&pos=${pos}&format=json`;
-    const qzonetoken = await this.getQzonetoken();
-    const extras: string[] = [];
-    if (t1Source !== undefined) extras.push(`t1_source=${t1Source}`);
-    if (t1Uin) extras.push(`t1_uin=${t1Uin}`);
-    if (t1Tid) extras.push(`t1_tid=${t1Tid}`);
-    
-    // 简化：只保留最有效的 3 个 GET 变体
-    const variants: string[] = [
-      extras.join('&'),                                    // 带 t1_source/t1_uin/t1_tid
-      `hostuin=${this.qqNumber}&qzreferrer=${this.getQzreferrer()}`,  // 完整认证参数
-      qzonetoken ? `qzonetoken=${qzonetoken}` : '',        // qzonetoken
-    ].filter(v => v);
-
-    let lastPayload: ApiResponse = {};
-    for (let index = 0; index < variants.length; index++) {
-      const suffix = variants[index]!;
-      const url = base + '&' + suffix;
-      try {
-        const resp = await this.get(url, { headers: this.pcHeaders(this.getQzreferrer()) });
-        this.dumpDebugPayload(`comments_pc_${index}`, resp.text);
-        const raw = resp.text.trim();
-        if (!raw) { log('DEBUG', `getComments(PC GET #${index}): 空响应`); continue; }
-        const payload = parseJsonp(raw) as ApiResponse;
-        lastPayload = payload ?? { raw: raw.slice(0, 200) };
-        const code = payload?.['code'] as number | undefined;
-        log('DEBUG', `getComments(PC GET #${index}): code=${code} comments≈${payload ? this.commentCount(payload) : 0}`);
-        if (payload && (code === undefined || code === 0)) {
-          this.commentsWinningVariant = index;
-          validateApiResponse('comment_list', payload, raw);
-          return payload;
-        }
-      } catch (exc) { log('DEBUG', `Comments GET variant ${index} failed: ${exc}`); }
-    }
-
-    this.commentsAllFailTime = Date.now() / 1000;
-    log('INFO', `getComments: PC 全部失败，回退 mobile (uin=${uin} tid=${tid})`);
-    try {
-      const resp = await this.get(mobileUrl, { headers: this.mobileHeaders() });
-      this.dumpDebugPayload('comments_mobile_fallback', resp.text);
-      const p = safeDecodeJsonResponse(resp.data);
-      log('DEBUG', `getComments(mobile fallback): valid=${this.isValidApiResponse(p)} comments≈${this.commentCount(p)}`);
-      if (this.isValidApiResponse(p)) return p;
-    } catch { /* ignore */ }
-    return lastPayload;
-  }
-
   async getCommentsBestEffort(uin: string, tid: string, num = 20, pos = 0): Promise<ApiResponse> {
     log('DEBUG', `getCommentsBestEffort: uin=${uin} tid=${tid} num=${num} pos=${pos}`);
-    
-    // 辅助函数：判断响应是否包含有效评论
-    const hasValidComments = (p: ApiResponse | null): boolean => {
-      if (!p || p['_empty']) return false;
-      const code = p['code'] as number | undefined;
-      if (code !== undefined && code !== 0) return false;
-      // 检查是否有实际的评论数据
-      const count = this.commentCount(p);
-      return count > 0;
-    };
 
-    // 尝试 PC API (t1_source=1)
-    try {
-      const p = await this.getComments(uin, tid, num, pos, 1, uin, tid);
-      if (hasValidComments(p)) {
-        log('INFO', `getCommentsBestEffort: 成功 (t1_source=1) 评论数≈${this.commentCount(p)}`);
-        return p;
-      }
-      log('DEBUG', `getCommentsBestEffort: t1_source=1 返回空结果，继续尝试下一种`);
-    } catch (e) { log('DEBUG', `getCommentsBestEffort t1_source=1 异常: ${e}`); }
-    
-    // 尝试 PC API (t1_source=0)
-    try {
-      const p = await this.getComments(uin, tid, num, pos, 0);
-      if (hasValidComments(p)) {
-        log('INFO', `getCommentsBestEffort: 成功 (t1_source=0) 评论数≈${this.commentCount(p)}`);
-        return p;
-      }
-      log('DEBUG', `getCommentsBestEffort: t1_source=0 返回空结果，继续尝试下一种`);
-    } catch (e) { log('DEBUG', `getCommentsBestEffort t1_source=0 异常: ${e}`); }
-    
-    // 尝试 mobile API
-    try {
-      const p = await this.getCommentsMobile(uin, tid, num, pos);
-      if (hasValidComments(p)) {
-        log('INFO', `getCommentsBestEffort: 使用 mobile 评论数≈${this.commentCount(p)}`);
-        return p;
-      }
-      log('DEBUG', `getCommentsBestEffort: mobile 返回空结果，继续尝试 feeds3 兜底`);
-    } catch (e) { log('DEBUG', `getCommentsBestEffort mobile 异常: ${e}`); }
-
-    // 兜底：使用 feeds3 拉取说说时已解析出的评论（仅覆盖最近通过 getEmotionList/getFriendFeeds 拉过的说说）
     let feeds3List = this.feeds3Comments.get(tid);
     
     // 如果缓存中没有该 tid 的评论，主动拉取 feeds3 HTML 来解析
@@ -1964,7 +1705,7 @@ export class QzoneClient {
     
     if (feeds3List && feeds3List.length > 0) {
       const slice = feeds3List.slice(pos, pos + num);
-      log('INFO', `getCommentsBestEffort: 使用 feeds3 兜底 评论数=${slice.length}/${feeds3List.length}`);
+      log('INFO', `getCommentsBestEffort: 使用 feeds3 评论数=${slice.length}/${feeds3List.length}`);
       return {
         code: 0,
         commentlist: slice,
@@ -1973,100 +1714,22 @@ export class QzoneClient {
       };
     }
 
-    log('WARNING', `getCommentsBestEffort: 全部失败 (含无 feeds3 兜底)`);
+    log('WARNING', `getCommentsBestEffort: 未获取到评论`);
     return { code: -1, message: 'all comment methods failed' };
   }
 
-  /**
-   * 轻量评论获取 — 仅发一次 POST 请求，不穷举变体。
-   * 用于 Poller 在 qz_opcnt2 检测到增量后做可选富化，
-   * 降低触发 -10000 限流的概率（旧 getCommentsBestEffort 会尝试 15+ 变体）。
-   */
-  async getCommentsLite(uin: string, tid: string, num = 20): Promise<ApiResponse> {
-    this.requireLogin();
-    const postUrl = `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_getcmtreply_v6?g_tk=${this.getGtk()}`;
-    const resp = await this.post(postUrl, {
-      data: new URLSearchParams({
-        uin, tid, num: String(num), pos: '0', format: 'json',
-        hostuin: this.qqNumber!, qzreferrer: this.getQzreferrer(),
-        t1_source: '1', t1_uin: uin, t1_tid: tid,
-      }),
-      headers: this.pcHeaders(this.getQzreferrer()),
-    });
-    this.dumpDebugPayload('comments_lite', resp.text);
-    const raw = resp.text.trim();
-    if (!raw) return { code: -1, _empty: true };
-    const payload = parseJsonp(raw) as ApiResponse;
-    if (payload && (payload['code'] === undefined || payload['code'] === 0)) {
-      return payload;
-    }
-    return payload ?? { code: -1, raw: raw.slice(0, 200) };
-  }
-
-  async getCommentsMobile(uin: string, tid: string, num = 20, pos = 0): Promise<ApiResponse> {
-    this.requireLogin();
-    const url = `https://mobile.qzone.qq.com/get_comment_list?g_tk=${this.getGtk()}&uin=${uin}&cellid=${tid}&num=${num}&pos=${pos}&format=json`;
-    const resp = await this.get(url, { headers: this.mobileHeaders() });
-    this.dumpDebugPayload('comments_mobile', resp.text);
-    return safeDecodeJsonResponse(resp.data);
-  }
-
   // ──────────────────────────────────────────────
-  // Like list (best effort with fallback chain)
+  // Like list (仅 feeds3，PC/mobile detail 已移除)
   // ──────────────────────────────────────────────
 
   private feeds3LikesCache = new Map<string, Array<Record<string, unknown>>>();
 
   /**
-   * 获取点赞列表（多级降级）。
-   * 降级链：PC detail → mobile detail → feeds3 HTML → 空数组
+   * 获取点赞列表（仅 feeds3）。
    */
   async getLikeListBestEffort(uin: string, tid: string): Promise<Array<Record<string, unknown>>> {
     log('DEBUG', `getLikeListBestEffort: uin=${uin} tid=${tid}`);
 
-    // 辅助函数：从响应提取点赞列表
-    const extractLikes = (data: ApiResponse): Array<Record<string, unknown>> | null => {
-      if (!data || data['_empty']) return null;
-      for (const key of ['like', 'likes', 'likeList', 'likelist']) {
-        if (Array.isArray(data[key])) return data[key] as Array<Record<string, unknown>>;
-      }
-      const dataObj = data['data'] && typeof data['data'] === 'object' ? data['data'] as Record<string, unknown> : {};
-      for (const key of ['like', 'likes', 'likeList', 'likelist']) {
-        if (Array.isArray(dataObj[key])) return dataObj[key] as Array<Record<string, unknown>>;
-      }
-      return null;
-    };
-
-    // 1. 尝试 PC detail
-    try {
-      const detail = await this.getShuoshuoDetail(uin, tid);
-      const likes = extractLikes(detail);
-      if (likes && likes.length > 0) {
-        log('INFO', `getLikeListBestEffort: PC detail 成功 ${likes.length} 个点赞`);
-        return likes;
-      }
-      log('DEBUG', `getLikeListBestEffort: PC detail 无点赞数据`);
-    } catch (e) {
-      log('DEBUG', `getLikeListBestEffort PC detail 异常: ${e}`);
-    }
-
-    // 2. 尝试 mobile detail
-    try {
-      const savedRoute = this.routes['detail'];
-      this.routes['detail'] = 'mobile';
-      const detail = await this.getShuoshuoDetail(uin, tid);
-      this.routes['detail'] = savedRoute;
-      const likes = extractLikes(detail);
-      if (likes && likes.length > 0) {
-        log('INFO', `getLikeListBestEffort: mobile detail 成功 ${likes.length} 个点赞`);
-        return likes;
-      }
-      log('DEBUG', `getLikeListBestEffort: mobile detail 无点赞数据`);
-    } catch (e) {
-      log('DEBUG', `getLikeListBestEffort mobile detail 异常: ${e}`);
-    }
-
-    // 3. 尝试 feeds3 兜底
     const cached = this.feeds3LikesCache.get(tid);
     if (cached) {
       log('INFO', `getLikeListBestEffort: 使用 feeds3 缓存 ${cached.length} 个点赞`);
@@ -2713,15 +2376,7 @@ export class QzoneClient {
   }
 
   async getLikeList(uin: string, tid: string): Promise<Record<string, unknown>[]> {
-    const detail = await this.getShuoshuoDetail(uin, tid);
-    for (const key of ['like', 'likes', 'likeList', 'likelist']) {
-      if (Array.isArray(detail[key])) return detail[key] as Record<string, unknown>[];
-    }
-    const dataObj = detail['data'] && typeof detail['data'] === 'object' ? detail['data'] as Record<string, unknown> : {};
-    for (const key of ['like', 'likes', 'likeList', 'likelist']) {
-      if (Array.isArray(dataObj[key])) return dataObj[key] as Record<string, unknown>[];
-    }
-    return [];
+    return this.getLikeListBestEffort(uin, tid);
   }
 
   // ──────────────────────────────────────────────
