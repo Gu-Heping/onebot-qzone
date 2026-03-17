@@ -49,11 +49,7 @@ The QZone API client with multi-level fallback strategies for reliability:
   - Auth failure codes: `{-3, -100, -3000, -10001, -10006}`
   - Rate limit codes: `{-10000, -2}`
 
-- **`feeds3Parser.ts`** - HTML parser for feeds3 responses extracting:
-  - Post content, images, videos (MP4/cover/duration)
-  - Comments (with nested replies)
-  - Likes (with user details, timestamps, custom icons)
-  - Device info, @mentions
+- **feeds3 解析** - 实现位于 `src/qzone/feeds3/`，由 barrel 文件 `feeds3Parser.ts` 统一导出。子模块：`preprocess.ts`（HTML 预处理）、`content.ts`（正文/表情/标签清理）、`items.ts`（说说列表 parseFeeds3Items）、`comments.ts`（评论 parseFeeds3Comments，含多级与评论内图片 pic）、`likes.ts`（点赞 parseFeeds3Likes）、`meta.ts`（说说元数据 parseFeeds3PostMeta）、`helpers.ts`（Mention/Video/Reply/Device/好友/翻页参数）。对外仍从 `feeds3Parser.js` 引用，行为不变。
 
 - **`schemas.ts`** + **`validate.ts`** - Zod runtime validation with 10 schema sets
 - **`rawLogger.ts`** - Automatic raw response logging on validation failures
@@ -137,7 +133,15 @@ src/
 ├── qzone/
 │   ├── client.ts              # QzoneClient (all API methods)
 │   ├── requestLayer.ts        # Unified request handling
-│   ├── feeds3Parser.ts        # HTML parsing for feeds3
+│   ├── feeds3Parser.ts        # Barrel: feeds3 解析聚合导出
+│   ├── feeds3/                # feeds3 子模块
+│   │   ├── preprocess.ts      # HTML 预处理
+│   │   ├── content.ts        # 正文/表情/标签清理
+│   │   ├── items.ts          # 说说列表 parseFeeds3Items
+│   │   ├── comments.ts       # 评论 parseFeeds3Comments
+│   │   ├── likes.ts          # 点赞 parseFeeds3Likes
+│   │   ├── meta.ts           # 说说元数据 parseFeeds3PostMeta
+│   │   └── helpers.ts        # Mention/Video/Reply/Device/好友/翻页
 │   ├── schemas.ts             # Zod validation schemas
 │   ├── validate.ts            # Validation entry points
 │   └── ...

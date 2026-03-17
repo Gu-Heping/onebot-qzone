@@ -118,32 +118,60 @@ async function main(): Promise<void> {
   });
   console.log(`getFriendFeeds: 共 ${friendList.length} 条, 已 dump 前 20 条\n`);
 
-  // 3) 评论真实数据（feeds3 HTML 内嵌评论，parseFeeds3Comments 解析结果，含一级与多级回复）
+  // 3) 评论真实数据（feeds3 HTML 内嵌评论，parseFeeds3Comments 解析结果，含一级与多级回复、评论内图片 pic）
   const commentsByPost = Object.fromEntries(client.feeds3Comments);
   const commentPostTids = Object.keys(commentsByPost);
+  const byPost: Record<string, unknown> = {};
+  for (const tid of commentPostTids.slice(0, 15)) {
+    const list = commentsByPost[tid] as Record<string, unknown>[];
+    byPost[tid] = list.map((c, i) => ({
+      index: i,
+      commentid: c['commentid'],
+      uin: c['uin'],
+      name: c['name'],
+      content: c['content'],
+      pic: c['pic'],
+      picCount: Array.isArray(c['pic']) ? (c['pic'] as unknown[]).length : 0,
+      createtime: c['createtime'],
+      is_reply: c['is_reply'],
+      parent_comment_id: c['parent_comment_id'],
+      reply_to_uin: c['reply_to_uin'],
+      reply_to_nickname: c['reply_to_nickname'],
+      reply_to_comment_id: c['reply_to_comment_id'],
+    }));
+  }
+  const fifthTid = friendList.length >= 5 ? (friendList[4] as Record<string, unknown>)['tid'] as string : undefined;
+  const fifthComments = fifthTid ? (commentsByPost[fifthTid] as Record<string, unknown>[] | undefined) : undefined;
   writeJson('debug_comments.json', {
-    _note: 'parseFeeds3Comments 从 feeds3 HTML 解析的评论，key 为帖子 tid，value 为该帖下评论列表（含 is_reply、parent_comment_id、reply_to_nickname 等）',
+    _note: 'parseFeeds3Comments 从 feeds3 HTML 解析的评论，含 pic（评论带图）。第五条动态评论见 fifthFeedComments',
     _ts: new Date().toISOString(),
     postCount: commentPostTids.length,
-    byPost: commentPostTids.slice(0, 15).reduce((acc, tid) => {
-      acc[tid] = (commentsByPost[tid] as Record<string, unknown>[]).map((c, i) => ({
-        index: i,
-        commentid: c['commentid'],
-        uin: c['uin'],
-        name: c['name'],
-        content: c['content'],
-        createtime: c['createtime'],
-        is_reply: c['is_reply'],
-        parent_comment_id: c['parent_comment_id'],
-        reply_to_uin: c['reply_to_uin'],
-        reply_to_nickname: c['reply_to_nickname'],
-        reply_to_comment_id: c['reply_to_comment_id'],
-      }));
-      return acc;
-    }, {} as Record<string, unknown>),
+    fifthFeedIndex: 4,
+    fifthFeedTid: fifthTid,
+    fifthFeedComments: fifthComments == null
+      ? null
+      : fifthComments.map((c, i) => ({
+          index: i,
+          commentid: c['commentid'],
+          uin: c['uin'],
+          name: c['name'],
+          content: c['content'],
+          pic: c['pic'],
+          picCount: Array.isArray(c['pic']) ? (c['pic'] as unknown[]).length : 0,
+          is_reply: c['is_reply'],
+          parent_comment_id: c['parent_comment_id'],
+          reply_to_nickname: c['reply_to_nickname'],
+        })),
+    byPost,
     _allPostTids: commentPostTids,
   });
-  console.log(`评论: ${commentPostTids.length} 个帖子有内嵌评论, 已 dump 前 15 个帖子的评论列表\n`);
+  console.log(`评论: ${commentPostTids.length} 个帖子有内嵌评论, 已 dump 前 15 个帖子的评论列表`);
+  if (fifthTid) {
+    const withPic = fifthComments?.filter((c) => Array.isArray(c['pic']) && (c['pic'] as unknown[]).length > 0) ?? [];
+    console.log(`第5条动态 tid=${fifthTid}, 评论数=${fifthComments?.length ?? 0}, 其中带图评论数=${withPic.length}\n`);
+  } else {
+    console.log('');
+  }
 
   // 4) 轮询间隔与说明（供排查「无法及时监听到」）
   const pollInterval = config.pollInterval;

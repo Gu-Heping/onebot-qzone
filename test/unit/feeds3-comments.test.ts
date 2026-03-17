@@ -280,6 +280,39 @@ const cases: TestCase[] = [
       assert(reply!['reply_to_nickname'] === '林汐', `reply_to_nickname 应为 "林汐"`);
     },
   },
+  {
+    name: '应解析评论中的图片（comments-thumbnails 或 body 内 qpic URL）',
+    fn: () => {
+      const picUrl = 'https://a1.qpic.cn/psc?/V11MnySM1E9aLp/TmEUgtj9EK6.7V8ajmQrEHmPP917WH0oeBkpRznMbP1U0MbbOkXAJdQxf4k77SEcEyiAEnfbAOiWO7zkfweNc5ONug05nLAxETci3WKXEqo!/m&ek=1&kp=1&pt=0';
+      const html = `
+<div class="comments-list">
+  <ul>
+    <li class="comments-item bor3" data-type="commentroot" data-tid="4" data-uin="2967010345" data-nick="共轭天子." data-who="1">
+      <div class="comments-item-bd">
+        <div class="single-reply">
+          <div class="comments-content">
+            <a class="nickname name c_tx q_namecard">共轭天子.</a>&nbsp; : <div class="comments-thumbnails"><a class="img-item " data-pickey="NR8AVjZiQ2dBeU9UWTNNREV3TXpRMTdwYTRhVjg2T1RnIQoAcGhvdG9uam1heg!!" data-albumid="V11MnySM1E9aLp">${picUrl}</a></div>
+        </div>
+        <div class="comments-op">
+          <span class="state">14:20</span>
+          <a class="reply" data-param="t1_tid=cded9d7ec5e9b76915ea0500&t1_uin=2124279245">回复</a>
+        </div>
+      </div>
+    </li>
+  </ul>
+</div>
+`;
+      const result = parseFeeds3Comments(html);
+      assert(result.size > 0, '应该解析出帖子');
+      const comments = result.get('cded9d7ec5e9b76915ea0500') ?? result.values().next().value!;
+      const withPic = comments.find((c: Record<string, unknown>) => c['commentid'] === '4');
+      assert(withPic !== undefined, '应该找到 commentid=4 的评论');
+      const pic = withPic!['pic'] as string[] | undefined;
+      assert(Array.isArray(pic) && pic.length >= 1, `评论应包含 pic 数组且至少 1 条，实际: ${JSON.stringify(pic)}`);
+      const hasQpic = pic.some((u: string) => u.includes('a1.qpic.cn') && u.includes('V11MnySM1E9aLp'));
+      assert(hasQpic, `pic 中应包含 a1.qpic.cn 的 URL，实际: ${pic.join(', ')}`);
+    },
+  },
 ];
 
 export async function run(): Promise<{ name: string; passed: number; failed: number; errors: Array<{ test: string; error: string }> }> {

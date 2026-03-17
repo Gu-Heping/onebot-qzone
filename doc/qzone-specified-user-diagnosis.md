@@ -29,7 +29,7 @@
 | 指定用户 策略2 | `feeds3`: uin=**当前登录号**、scope=0、**uinlist=目标** | 后端可能不支持或该环境下返回空（113 字节）❌ |
 | 指定用户 策略3 | `feeds3`: uin=**目标**、scope=0 | 相当于「看目标的好友动态」，cookie 是 bot，权限不足，返回空 ❌ |
 
-结论：**唯一稳定有数据的是「当前登录号 + scope=0 + 无 uinlist」的好友动态流**。指定用户目前依赖的 scope=1 / scope=0+uinlist / scope=0+uin=目标 在 bot 身份下都拿不到数据。
+结论：**唯一稳定有数据的是「当前登录号 + scope=0 + 无 uinlist」的好友动态流**。指定用户目前依赖的 scope=1 / scope=0+uinlist / scope=0+uin=目标 在 bot 身份下都拿不到数据。feeds3 解析逻辑位于 `src/qzone/feeds3/`。
 
 ## 修复思路
 

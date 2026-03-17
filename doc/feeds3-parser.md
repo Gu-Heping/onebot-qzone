@@ -6,6 +6,20 @@
 
 当主接口 `emotion_cgi_msglist_v6` 被限流（`-10000`）或其他 PC 端 GET 接口返回空响应时，feeds3 是核心降级方案。
 
+### 代码结构
+
+解析实现位于 **`src/qzone/feeds3/`**，对外 API 由 **`src/qzone/feeds3Parser.ts`** 统一导出（barrel）。子模块与职责：
+
+| 子模块 | 职责 |
+|--------|------|
+| `preprocess.ts` | HTML 预处理 |
+| `content.ts` | 表情/标签/正文文本清理 |
+| `items.ts` | `parseFeeds3Items` 说说列表 |
+| `comments.ts` | `parseFeeds3Comments`、`Feeds3Comment`（含多级与评论内图片 pic） |
+| `likes.ts` | `parseFeeds3Likes` 点赞 |
+| `meta.ts` | `parseFeeds3PostMeta` 说说元数据 |
+| `helpers.ts` | `parseMentions`、`extractVideos`、`parseReplyComments`、`parseEnhancedComment`、`extractDeviceInfo`、`extractFriendsFromFeeds3FromText`、`extractExternparam` |
+
 ## 接口信息
 
 **URL**: `https://user.qzone.qq.com/proxy/domain/ic2.qzone.qq.com/cgi-bin/feeds/feeds3_html_more`
@@ -107,6 +121,8 @@ const cmtnumPat = /class="f-ct[^"]*"[^>]*>(\d+)/;
 5. 去重（按 tid）
 6. 从每个块中提取：内容、昵称、评论数
 7. 提取图片：匹配 `<img>` 标签中包含 `qpic.cn` 或常见图片扩展名的 URL
+
+实现细节见 `src/qzone/feeds3/` 对应子模块（如 items.ts、comments.ts）。
 
 ### 图片提取（增强版）
 
@@ -424,6 +440,7 @@ interface Feeds3Comment {
   reply_to_nickname?: string; // 回复目标用户昵称（二级评论）
   reply_to_comment_id?: string; // 回复目标评论 ID（二级评论）
   parent_comment_id?: string; // 父评论 ID（二级评论所属的一级评论）
+  pic?: string[];             // 评论内图片 URL 列表（qpic.cn / photo.store.qq.com），从 comments-thumbnails 或评论 body 内 img/qpic 提取
   _source: 'feeds3_html';
 }
 ```
