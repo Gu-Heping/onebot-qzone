@@ -4,9 +4,26 @@
    提取说说列表、好友列表、翻页参数
    ───────────────────────────────────────────── */
 
+import fs from 'node:fs';
+import path from 'node:path';
 import { log, htmlUnescape, parseJsonp } from './utils.js';
 import { processEmojis, parseEmojis } from './emoji.js';
 import type { EmojiInfo } from './types.js';
+
+// #region agent log
+const DEBUG_LOG_PATH = path.join(process.cwd(), '.cursor', 'debug.log');
+function debugIngest(message: string, data: Record<string, unknown>, hypothesisId?: string): void {
+  try {
+    const line = JSON.stringify({
+      location: 'feeds3Parser.ts',
+      message,
+      data: { ...data, hypothesisId: hypothesisId ?? null },
+      timestamp: Date.now(),
+    }) + '\n';
+    fs.appendFileSync(DEBUG_LOG_PATH, line);
+  } catch (_) {}
+}
+// #endregion
 
 // ── 解析统计与验证 ─────────────────────────────
 
@@ -50,7 +67,13 @@ function formatTimestampToReadable(ts: number): string {
   if (!Number.isFinite(ts) || ts <= 0) return '';
   const ms = ts < 1e12 ? ts * 1000 : ts;
   const d = new Date(ms);
-  return d.toISOString().replace('T', ' ').slice(0, 16);
+  // 使用本地时间而非 UTC
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  const hour = String(d.getHours()).padStart(2, '0');
+  const minute = String(d.getMinutes()).padStart(2, '0');
+  return `${year}-${month}-${day} ${hour}:${minute}`;
 }
 
 /** HTML 预处理：统一清理和规范化 */
@@ -168,7 +191,11 @@ export function parseFeeds3Items(
   const contentPat = /class="txt-box(?:-title)?[^"]*"[^>]*>([\s\S]*?)(?:<\/p>|<\/div>)/;
   const contentPatAlt = /class="txt-box\s[^"]*"[^>]*>([\s\S]*?)(?:<div\s+class="f-single-foot|<div\s+class="f-ct-b|<\/li>)/;
   const nicknamePat = /class="f-name[^"]*"[^>]*>([\s\S]*?)<\/a>/;
+  // 评论数匹配（支持 HTML 和 JS 编码格式 \x3C = <, \x22 = "）
   const cmtnumPat = /class="f-ct[^"]*"[^>]*>(\d+)/;
+  // 从 feed 块或 feed_data 属性中提取评论数
+  const cmtnumFromBlockPat = /cmtnum["']?\s*[=:]\s*["']?(\d+)/i;
+  const cmtNumFromDataAttrPat = /data-cmtnum="(\d+)"/i;
 
   let fdm: RegExpExecArray | null;
   while ((fdm = feedDataPat.exec(processedText)) !== null) {
@@ -202,8 +229,36 @@ export function parseFeeds3Items(
     if (filterUin && (!matchedBlock || matchedBlock.opuin !== filterUin)) continue;
     if (filterAppid && matchedBlock && matchedBlock.appid !== filterAppid) continue;
 
-    const searchAfter = processedText.substring(fdPos, Math.min(fdPos + 5000, processedText.length));
-    const searchBefore = processedText.substring(Math.max(0, fdPos - 5000), fdPos);
+    // #region agent log
+    const blockTypeidForLog = matchedBlock?.typeid ?? '';
+    debugIngest('feed_data matchedBlock', {
+      tid,
+      dataUin,
+      hasMatchedBlock: !!matchedBlock,
+      blockOpuin: matchedBlock?.opuin ?? null,
+      blockAppid: matchedBlock?.appid ?? null,
+      blockTypeid: blockTypeidForLog,
+      isForwardLike: blockTypeidForLog === '5' || !!(origTid && origTid !== tid && origUin && origUin !== dataUin),
+    }, 'H1');
+    // #endregion
+
+    // 将内容与图片/视频的搜索范围限制在「当前 feed_data 与下一 feed_data」之间，避免把相邻说说的图片/视频算进本条
+    const nextFdPos = processedText.indexOf('name="feed_data"', fdPos + 1);
+    const prevFdPos = fdPos > 0 ? processedText.lastIndexOf('name="feed_data"', fdPos - 1) : -1;
+    const afterEnd = nextFdPos >= 0 ? Math.min(nextFdPos, fdPos + 8000) : Math.min(fdPos + 5000, processedText.length);
+    const beforeStart = prevFdPos >= 0 ? Math.max(prevFdPos, fdPos - 8000) : Math.max(0, fdPos - 5000);
+    const searchAfter = processedText.substring(fdPos, afterEnd);
+    const searchBefore = processedText.substring(beforeStart, fdPos);
+
+    // #region agent log
+    debugIngest('search range', {
+      tid,
+      nextFdPos: nextFdPos >= 0 ? nextFdPos : -1,
+      afterEndOffset: afterEnd - fdPos,
+      searchAfterLen: searchAfter.length,
+      nextFeedDataInAfter: searchAfter.indexOf('name="feed_data"'),
+    }, 'H2');
+    // #endregion
 
     let content = '';
     let nickname = '';
@@ -234,8 +289,27 @@ export function parseFeeds3Items(
 
     if (cmAfter) {
       const rawHtml = cmAfter[1]!;
+      const trimmedHtml = rawHtml.trim();
 
-      if (isForward || rawHtml.includes('>转发')) {
+      // 当 txt-box 匹配成功但内容为空/仅空白时，回退到 f-info
+      if ((!trimmedHtml || trimmedHtml === '' || /^\s*$/.test(trimmedHtml)) && cmFInfo) {
+        content = extractFeedContentFromHtml(cmFInfo[1]!);
+
+        if (isForward) {
+          rt_tid = origTid || tid;
+          rt_uin = origUin || dataUin;
+
+          if (cmTxtBoxAfter) {
+            const origHtml = cmTxtBoxAfter[1]!;
+            const origNickMatch = origHtml.match(/<a[^>]*class="nickname[^"]*"[^>]*>([^<]+)<\/a>/);
+            rt_uinname = origNickMatch ? origNickMatch[1]!.trim() : '';
+
+            const origText = extractFeedContentFromHtml(origHtml);
+            const origColonIdx = origText.indexOf('：');
+            rt_con = origColonIdx >= 0 ? origText.substring(origColonIdx + 1).trim() : origText;
+          }
+        }
+      } else if (isForward || rawHtml.includes('>转发')) {
         const sections = rawHtml.split(/<a\s+class="nickname/);
 
         if (sections.length >= 3) {
@@ -243,9 +317,7 @@ export function parseFeeds3Items(
           const fwdNickMatch = fwdSection.match(/>([^<]+)<\/a>/);
           nickname = fwdNickMatch ? fwdNickMatch[1]!.trim() : '';
 
-          const fwdTextClean = fwdSection
-            .replace(/<[^>]+>/g, '').replace(/&nbsp;/gi, ' ')
-            .replace(/\\[trn]/g, '').replace(/[\t\r\n]+/g, ' ').trim();
+          const fwdTextClean = extractFeedContentFromHtml(fwdSection);
           const fwdColonIdx = fwdTextClean.indexOf('：');
           const fwdContent = fwdColonIdx >= 0 ? fwdTextClean.substring(fwdColonIdx + 1).trim() : fwdTextClean;
 
@@ -253,9 +325,7 @@ export function parseFeeds3Items(
           const origNickMatch = origSection.match(/>([^<]+)<\/a>/);
           rt_uinname = origNickMatch ? origNickMatch[1]!.trim() : '';
 
-          const origTextClean = origSection
-            .replace(/<[^>]+>/g, '').replace(/&nbsp;/gi, ' ')
-            .replace(/\\[trn]/g, '').replace(/[\t\r\n]+/g, ' ').trim();
+          const origTextClean = extractFeedContentFromHtml(origSection);
           const origColonIdx = origTextClean.indexOf('：');
           rt_con = origColonIdx >= 0 ? origTextClean.substring(origColonIdx + 1).trim() : origTextClean;
 
@@ -268,9 +338,7 @@ export function parseFeeds3Items(
           const origNickMatch = origSection.match(/>([^<]+)<\/a>/);
           rt_uinname = origNickMatch ? origNickMatch[1]!.trim() : '';
 
-          const origTextClean = origSection
-            .replace(/<[^>]+>/g, '').replace(/&nbsp;/gi, ' ')
-            .replace(/\\[trn]/g, '').replace(/[\t\r\n]+/g, ' ').trim();
+          const origTextClean = extractFeedContentFromHtml(origSection);
           const origColonIdx = origTextClean.indexOf('：');
           rt_con = origColonIdx >= 0 ? origTextClean.substring(origColonIdx + 1).trim() : origTextClean;
 
@@ -279,8 +347,7 @@ export function parseFeeds3Items(
           content = ''; // 转发者没有添加内容
         }
       } else {
-        const rawText = rawHtml.replace(/<[^>]+>/g, '').replace(/&nbsp;/gi, ' ')
-          .replace(/\\[trn]/g, '').replace(/[\t\r\n]+/g, ' ').trim();
+        const rawText = extractFeedContentFromHtml(rawHtml);
         const colonIdx = rawText.indexOf('：');
         if (colonIdx >= 0) {
           content = rawText.substring(colonIdx + 1).trim();
@@ -290,9 +357,7 @@ export function parseFeeds3Items(
         }
       }
     } else if (cmFInfo) {
-      const rawText = cmFInfo[1]!.replace(/<[^>]+>/g, '').replace(/&nbsp;/gi, ' ')
-        .replace(/\\[trn]/g, '').replace(/[\t\r\n]+/g, ' ').trim();
-      content = rawText;
+      content = extractFeedContentFromHtml(cmFInfo[1]!);
 
       if (isForward) {
         rt_tid = origTid || tid;
@@ -311,24 +376,171 @@ export function parseFeeds3Items(
       }
     }
 
+    // 转发专用 fallback：当 rt_con 仍空时，从 txt-box/block 再捞一次原文
+    if (isForward && !rt_con) {
+      if (cmTxtBoxAfter) {
+        const origHtml = cmTxtBoxAfter[1]!;
+        const origText = extractFeedContentFromHtml(origHtml);
+        if (origText.length > 0) {
+          const idx = origText.indexOf('：');
+          rt_con = idx >= 0 ? origText.substring(idx + 1).trim() : origText;
+        }
+      }
+      if (!rt_con && matchedBlock?.block) {
+        const block = matchedBlock.block;
+        const origPat = /(?:txt-box|f-info|ellipsis|content-box)[^>]*>([\s\S]*?)(?:<\/p>|<\/div>|<\/span>)/gi;
+        let om: RegExpExecArray | null;
+        while ((om = origPat.exec(block)) !== null) {
+          const raw = extractFeedContentFromHtml(om[1]!);
+          if (raw.length > 0 && !/^[\d\s·]+$/.test(raw)) {
+            rt_con = raw.includes('：') ? raw.substring(raw.indexOf('：') + 1).trim() : raw;
+            if (rt_con.length > 0) break;
+          }
+        }
+      }
+    }
+
     if (!nickname) {
       const searchRegion = searchAfter + searchBefore;
       const nm = searchRegion.match(nicknamePat);
       if (nm) nickname = nm[1]!.replace(/<[^>]+>/g, '').trim();
     }
 
-    const cm2 = searchAfter.match(cmtnumPat);
-    if (cm2) cmtnum = parseInt(cm2[1]!, 10);
+    // 内容仍为空时：从 matchedBlock 内用宽松正则再捞一次正文（含纯 emoji，避免「有表情却显示无正文」）
+    if (!content && matchedBlock?.block) {
+      const block = matchedBlock.block;
+      const looseContentPat = /(?:txt-box-title|txt-box|f-info|ellipsis|content-box)[^>]*>([\s\S]*?)(?:<\/p>|<\/div>|<\/span>)/gi;
+      let looseMatch: RegExpExecArray | null;
+      while ((looseMatch = looseContentPat.exec(block)) !== null) {
+        const raw = extractFeedContentFromHtml(looseMatch[1]!);
+        if (raw.length > 0 && !/^[\d\s·]+$/.test(raw) && !/^https?:\/\//.test(raw)) {
+          const afterColon = raw.includes('：') ? raw.substring(raw.indexOf('：') + 1).trim() : raw;
+          if (afterColon.length > 0) {
+            content = afterColon;
+            break;
+          }
+        }
+      }
+    }
+
+    // 转发且正文为空时：用原文作为可展示的 content
+    if (isForward && !content && rt_con) {
+      content = rt_con;
+    }
+
+    // #region agent log
+    debugIngest('content source', {
+      tid,
+      contentLen: content.length,
+      contentSnippet: content.slice(0, 80),
+      hadCmAfter: !!cmAfter,
+      hadCmFInfo: !!cmFInfo,
+      sectionsLength: cmAfter ? (cmAfter[1]!.split(/<a\s+class="nickname/).length) : 0,
+    }, 'H4');
+    // #endregion
+
+    // ── 评论数提取（多级回退策略）────────────────────────────────────────────
+    // 1. 优先从 matchedBlock 中提取（最准确，来自 JSON 数据）
+    if (matchedBlock?.block) {
+      const cmtFromBlock = matchedBlock.block.match(cmtnumFromBlockPat);
+      if (cmtFromBlock) {
+        cmtnum = parseInt(cmtFromBlock[1]!, 10);
+      }
+    }
+    // 2. 从 feed_data 属性中提取
+    if (cmtnum === 0) {
+      const cmtFromAttr = searchAfter.match(cmtNumFromDataAttrPat);
+      if (cmtFromAttr) {
+        cmtnum = parseInt(cmtFromAttr[1]!, 10);
+      }
+    }
+    // 3. 从 HTML f-ct 类中提取
+    if (cmtnum === 0) {
+      const cm2 = searchAfter.match(cmtnumPat);
+      if (cm2) cmtnum = parseInt(cm2[1]!, 10);
+    }
+    // 4. 从 feed 块中的 cmtnum 字段提取（更多格式）
+    if (cmtnum === 0 && matchedBlock?.block) {
+      const cmtFromJson = matchedBlock.block.match(/"cmtnum":\s*(\d+)/)
+        || matchedBlock.block.match(/'cmtnum':\s*(\d+)/)
+        || matchedBlock.block.match(/cmtnum\s*:\s*(\d+)/);
+      if (cmtFromJson) cmtnum = parseInt(cmtFromJson[1]!, 10);
+    }
+    // 5. 通过统计实际评论项数量（当所有其他方法失败时）
+    if (cmtnum === 0 && matchedBlock?.block) {
+      const block = matchedBlock.block;
+      // 匹配所有 comments-item（包括 commentroot 和 replyroot）
+      const commentItems = block.match(/<li\s+class="comments-item/gi);
+      if (commentItems) {
+        cmtnum = commentItems.length;
+      }
+    }
+
+    // ── 点赞数提取（多级回退策略）────────────────────────────────────────────
+    let likenum = 0;
+    // 1. 从 matchedBlock JSON 数据中提取
+    if (matchedBlock?.block) {
+      const likeFromBlock = matchedBlock.block.match(/"likenum":\s*(\d+)/i)
+        || matchedBlock.block.match(/'likenum':\s*(\d+)/i)
+        || matchedBlock.block.match(/likenum["']?\s*[=:]\s*["']?(\d+)/i)
+        || matchedBlock.block.match(/"like_count":\s*(\d+)/)
+        || matchedBlock.block.match(/likecount[=:]\s*(\d+)/i);
+      if (likeFromBlock) likenum = parseInt(likeFromBlock[1]!, 10);
+    }
+    // 2. 从 f-like-cnt 类提取（支持 HTML 和 JS 编码格式）
+    if (likenum === 0) {
+      const likeMatch = searchAfter.match(/class="f-like-cnt"[^>]*>(\d+)</i)
+        || searchAfter.match(/data-likecount="(\d+)"/i)
+        || searchAfter.match(/data-likecnt="(\d+)"/i)
+        || searchAfter.match(/like_num["']?\s*[=:]\s*["']?(\d+)/i)
+        || searchAfter.match(/"like_num":\s*(\d+)/)
+        // JS 编码格式：\x3C = <, \x22 = ", \x3E = >
+        || searchAfter.match(/\\x3Cspan class=\\x22f-like-cnt\\x22[^>]*>(\d+)\\x3C/i)
+        || searchAfter.match(/\\x3C[^>]*f-like-cnt[^>]*>(\d+)\\x3C/i);
+      if (likeMatch) likenum = parseInt(likeMatch[1]!, 10);
+    }
+    // 3. 从 feed_data 区域统计区域提取
+    if (likenum === 0) {
+      const likeFromStats = searchAfter.match(/<a[^>]*class="[^"]*f-like[^"]*"[^>]*>[\s\S]*?<\/a>/gi);
+      if (likeFromStats) {
+        for (const likeElem of likeFromStats) {
+          const numMatch = likeElem.match(/>(\d+)</);
+          if (numMatch) {
+            likenum = parseInt(numMatch[1]!, 10);
+            break;
+          }
+        }
+      }
+    }
 
     const fullRegion = searchBefore + searchAfter;
     const regionDecoded = htmlUnescape(fullRegion);
+    // 仅用于 img fallback：截断到下一 feed 之前，避免把下一条说说的图算进本条
+    const nextFeedDataInAfter = searchAfter.indexOf('name="feed_data"');
+    const searchAfterCurrentOnly = nextFeedDataInAfter >= 0 ? searchAfter.substring(0, nextFeedDataInAfter) : searchAfter;
+    const regionCurrentFeedOnly = searchBefore + searchAfterCurrentOnly;
+    const regionCurrentDecoded = htmlUnescape(regionCurrentFeedOnly);
 
     // ── 增强图片提取：优先从 data-pickey 提取原始 URL 和尺寸元数据 ──
-    // data-pickey 格式："{tid},{photo.store.qq.com 原始URL}"
+    // data-pickey 格式："{tid},{photo.store.qq.com 原始URL}"；只收集属于当前说说的图（pickey 的 tid 与当前 tid 一致）
     const picKeyPat = /<a[^>]+class="img-item[^"]*"[^>]*data-pickey="([^,]+),([^"]+)"[^>]*>/gi;
+    const validTidLike = (s: string) => /^[a-zA-Z0-9_-]{6,64}$/.test(s);
     let picKeyMatch: RegExpExecArray | null;
     while ((picKeyMatch = picKeyPat.exec(regionDecoded)) !== null) {
+      const pickeyTid = picKeyMatch[1]!;
       const originalUrl = picKeyMatch[2]!;
+      if (!validTidLike(pickeyTid)) {
+        // #region agent log
+        debugIngest('pickey tid skip', { tid, pickeyTid, dataUin, reason: 'invalid_tid_format' }, 'H3');
+        // #endregion
+        continue;
+      }
+      if (pickeyTid !== tid) {
+        // #region agent log
+        debugIngest('pickey tid skip', { tid, pickeyTid, dataUin }, 'H3');
+        // #endregion
+        continue;
+      }
       if (!images.includes(originalUrl)) {
         images.push(originalUrl);
         // 提取尺寸元数据
@@ -344,14 +556,91 @@ export function parseFeeds3Items(
       }
     }
 
-    // Fallback：从 <img src> 提取（排除已提取的）
-    for (const im of regionDecoded.matchAll(/<img[^>]+src="([^"]+)"/gi)) {
+    // 排除非用户上传的图片模式
+    const EXCLUDED_IMAGE_PATTERNS = [
+      /qzonestyle\.gtimg\.cn\/qzone\/em\//,      // QQ表情
+      /qzonestyle\.gtimg\.cn\/qzone\/space\//,    // 空间图标
+      /\/ac\/b\.gif$/,                           // 1x1 透明图
+      /qlogo\.cn/,                               // QQ头像
+      /qzapp\.qlogo\.cn/,                       // 应用图标
+      /qzonestyle\.gtimg\.cn\/act/,             // 活动图标
+    ];
+    function isUserUploadedImage(url: string): boolean {
+      return !EXCLUDED_IMAGE_PATTERNS.some(pat => pat.test(url));
+    }
+
+    // Fallback：从 <img src> 提取（排除已提取的）；仅在「当前 feed 内」搜索，避免下一条的图误入
+    // photo.store 与 a1.qpic.cn 都收集，输出阶段优先保留可访问的 a1.qpic.cn
+    for (const im of regionCurrentDecoded.matchAll(/<img[^>]+src="([^"]+)"/gi)) {
       const src = im[1]!;
       if ((src.includes('qpic.cn') || src.includes('photo.store.qq.com') ||
            /\.(jpg|jpeg|png|gif|webp)$/i.test(src)) &&
-          !src.includes('qlogo') && !images.includes(src)) {
+          !src.includes('qlogo') && !images.includes(src) &&
+          isUserUploadedImage(src)) {
         images.push(src);
         picsMeta.push({ url: src });
+      }
+    }
+
+    // ── 视频提取 ───────────────────────────────────────────────────────────────
+    let videos: Array<{ videoId: string; coverUrl: string; videoUrl?: string; duration?: number; width?: number; height?: number }> = [];
+    const videoCoverUrls: string[] = []; // 追踪视频封面URL，用于后续过滤
+
+    // 1. 从 data-vid 属性提取视频（feeds3 中常见）
+    const videoPat = /data-vid="(\d+)"|<video[^>]*data-src="([^"]+)"|<div[^>]*class="[^"]*video[^"]*"[^>]*data-vid="(\d+)"/gi;
+    const videoMatches = [...regionDecoded.matchAll(videoPat)];
+    for (const vm of videoMatches) {
+      const vid = vm[1] || vm[3];
+      const videoUrl = vm[2];
+      if (vid && !videos.some(v => v.videoId === vid)) {
+        // 尝试提取封面图（通常是 data-pic 或附近的 img）
+        const coverMatch = regionDecoded.match(new RegExp(`data-vid="${vid}"[^>]*data-pic="([^"]+)"`, 'i'))
+          || regionDecoded.match(new RegExp(`data-pic="([^"]+)"[^>]*data-vid="${vid}"`, 'i'));
+        const coverUrl = coverMatch?.[1] || '';
+        if (coverUrl) videoCoverUrls.push(coverUrl);
+        videos.push({
+          videoId: vid,
+          coverUrl: coverUrl,
+          videoUrl: videoUrl || undefined,
+        });
+      }
+    }
+
+    // 2. 从 video 标签提取（如果有直接嵌入）
+    const videoTagPat = /<video[^>]*src="([^"]+)"[^>]*>/gi;
+    for (const vtm of regionDecoded.matchAll(videoTagPat)) {
+      const src = vtm[1]!;
+      if (!videos.some(v => v.videoUrl === src)) {
+        // 尝试提取 poster 作为封面
+        const posterMatch = vtm[0].match(/poster="([^"]+)"/);
+        const coverUrl = posterMatch?.[1] || '';
+        if (coverUrl) videoCoverUrls.push(coverUrl);
+        videos.push({
+          videoId: `video_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+          coverUrl: coverUrl,
+          videoUrl: src,
+        });
+      }
+    }
+
+    // 3. 增强视频检测：从 qqvideo 链接提取
+    const qqVideoPat = /qqvideo\.qq\.com|v\.qq\.com|data-src="[^"]*video/gi;
+    if (qqVideoPat.test(regionDecoded) && videos.length === 0) {
+      // 检测到视频链接但没有提取到视频，尝试更宽松的匹配
+      const qvideoPat = /class="[^"]*(?:qvideo|video-box|video-container)[^"]*"/gi;
+      const qvideoMatch = regionDecoded.match(qvideoPat);
+      if (qvideoMatch) {
+        // 从这些视频容器中尝试提取封面
+        for (const container of qvideoMatch) {
+          const containerMatch = regionDecoded.match(new RegExp(`${container.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[\\s\\S]*?<img[^>]+src="([^"]+)"`, 'i'));
+          if (containerMatch && !videoCoverUrls.includes(containerMatch[1]!)) {
+            videoCoverUrls.push(containerMatch[1]!);
+            videos.push({
+              videoId: `video_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+              coverUrl: containerMatch[1]!,
+            });
+          }
+        }
       }
     }
 
@@ -366,34 +655,41 @@ export function parseFeeds3Items(
 
     if (appid && appid !== '311') {
       const searchAll = searchBefore + searchAfter;
+      const isBilibili = /bilibili\.com|b23\.tv/i.test(searchAll);
 
       // appName：data-appname 属性 或 class 含 app-name 的元素文本
       const appNameM = searchAll.match(/data-appname="([^"]+)"/i)
         ?? searchAll.match(/<[^>]+class="[^"]*(?:app-name|f-app-name)[^"]*"[^>]*>([\s\S]*?)<\/[a-z]+>/i);
       if (appNameM) appName = appNameM[1]!.replace(/<[^>]+>/g, '').trim();
 
-      // ── 音乐分享专用解析（appid=202=网易云音乐，appid=2100=QQ音乐等）──
-      if (appid === '202' || appid === '2100') {
+      // ── 音乐分享专用解析（appid=202=网易云音乐，appid=2100=QQ音乐等）；B站链接按视频分享处理，不走音乐分支 ──
+      if ((appid === '202' || appid === '2100') && !isBilibili) {
         // 提取歌曲名：<h4 class="txt-box-title"><a>{歌曲名}</a></h4>
         const songNameM = searchAll.match(/<h4[^>]+class="[^"]*txt-box-title[^"]*"[^>]*>[\s\S]*?<a[^>]*>([^<]+)<\/a>/i);
         // 提取歌手名：<a class="f-name info state ellipsis-two">{歌手名}</a>
         const artistNameM = searchAll.match(/<a[^>]+class="[^"]*f-name[^"]*info[^"]*"[^>]*>([^<]+)<\/a>/i);
-        // 提取封面图：<img trueSrc="{封面URL}"> 或 trueSrc:'{封面URL}'（JS 延迟加载）
-        const coverM = searchAll.match(/<img[^>]+trueSrc=["']([^"']+)["']/i)
-          ?? searchAll.match(/trueSrc:['"]([^'"]+)['"]/i);
-        // 提取播放链接：<a href="{播放链接}"> 在 img-box 内
-        const playUrlM = searchAll.match(/<div[^>]+class="[^"]*img-box[^"]*"[^>]*>[\s\S]*?<a[^>]+href="([^"]+)"/i);
+        const artistStr = artistNameM?.[1]?.trim() ?? '';
+        // B站等视频分享在 appid 202/2100 下会匹配到「标题」+「1234播放·点赞·弹幕」，不当作音乐
+        const looksLikeVideoStats = /\d+播放|点赞|弹幕/.test(artistStr);
+        if (!looksLikeVideoStats) {
+          // 提取封面图：<img trueSrc="{封面URL}"> 或 trueSrc:'{封面URL}'（JS 延迟加载）
+          const coverM = searchAll.match(/<img[^>]+trueSrc=["']([^"']+)["']/i)
+            ?? searchAll.match(/trueSrc:['"]([^'"]+)['"]/i);
+          // 提取播放链接：<a href="{播放链接}"> 在 img-box 内
+          const playUrlM = searchAll.match(/<div[^>]+class="[^"]*img-box[^"]*"[^>]*>[\s\S]*?<a[^>]+href="([^"]+)"/i);
 
-        if (songNameM) {
-          musicShare = {
-            songName: songNameM[1]!.trim(),
-            artistName: artistNameM?.[1]?.trim(),
-            coverUrl: coverM?.[1],
-            playUrl: playUrlM?.[1],
-          };
-          // 音乐分享的 appShareTitle 设为「歌曲名 - 歌手名」格式
-          appShareTitle = musicShare.songName + (musicShare.artistName ? ` - ${musicShare.artistName}` : '');
-          log('DEBUG', `parseFeeds3Items: music share detected, song=${musicShare.songName}, artist=${musicShare.artistName ?? '(unknown)'}`);
+          if (songNameM) {
+            musicShare = {
+              songName: songNameM[1]!.trim(),
+              artistName: artistStr || undefined,
+              coverUrl: coverM?.[1],
+              playUrl: playUrlM?.[1],
+            };
+            appShareTitle = musicShare.songName + (musicShare.artistName ? ` - ${musicShare.artistName}` : '');
+            log('DEBUG', `parseFeeds3Items: music share detected, song=${musicShare.songName}, artist=${musicShare.artistName ?? '(unknown)'}`);
+          }
+        } else if (songNameM) {
+          appShareTitle = (songNameM[1]!.trim() + ' ' + artistStr).trim();
         }
       }
 
@@ -403,6 +699,48 @@ export function parseFeeds3Items(
         const titleM = searchAll.match(/<p[^>]*class="[^"]*ell[^"]*"[^>]*>([\s\S]*?)<\/p>/i)
           ?? searchAll.match(/<[^>]+class="[^"]*(?:f-ct-title|app-title|app-content-title)[^"]*"[^>]*>([\s\S]*?)<\/[a-z]+>/i);
         if (titleM) appShareTitle = titleM[1]!.replace(/<[^>]+>/g, '').replace(/&nbsp;/gi, ' ').trim();
+      }
+
+      // B站等视频分享：正文为用户写的短评（如 awsl），视频标题+播放信息放入 appShareTitle
+      // 有 bilibili 链接或 content 形如「标题 1234播放·点赞·弹幕」时做分离
+      const looksLikeVideoTitle = (s: string) => typeof s === 'string' && s.length > 0 && (/\d+播放|点赞|弹幕/.test(s));
+      if (!musicShare && (isBilibili || looksLikeVideoTitle(content))) {
+        if (looksLikeVideoTitle(content)) {
+          if (!appShareTitle) appShareTitle = content.trim();
+          content = '';
+        }
+        let userText = '';
+        if (cmFInfo) {
+          const raw = extractFeedContentFromHtml(cmFInfo[1]!);
+          if (raw && !looksLikeVideoTitle(raw)) userText = raw;
+        }
+        if (!userText && matchedBlock?.block) {
+          const block = matchedBlock.block;
+          const pat = /(?:txt-box|f-info|ellipsis|content-box)[^>]*>([\s\S]*?)(?:<\/p>|<\/div>|<\/span>)/gi;
+          let m: RegExpExecArray | null;
+          while ((m = pat.exec(block)) !== null) {
+            const raw = extractFeedContentFromHtml(m[1]!);
+            if (raw.length > 0 && raw.length < 300 && !looksLikeVideoTitle(raw) && !/^[\d\s·]+$/.test(raw)) {
+              userText = raw;
+              break;
+            }
+          }
+        }
+        if (!userText) {
+          for (const region of [searchAfter, searchBefore]) {
+            const pat2 = /(?:txt-box|f-info|f-ct)[^>]*>([\s\S]*?)(?:<\/p>|<\/div>|<\/span>|<\/a>)/gi;
+            let m2: RegExpExecArray | null;
+            while ((m2 = pat2.exec(region)) !== null) {
+              const raw = extractFeedContentFromHtml(m2[1]!);
+              if (raw.length > 0 && raw.length < 100 && !looksLikeVideoTitle(raw) && !/^[\d\s·]+$/.test(raw)) {
+                userText = raw;
+                break;
+              }
+            }
+            if (userText) break;
+          }
+        }
+        if (userText) content = userText;
       }
 
       // unikey：优先从 data-unikey 属性提取（点赞按钮上）
@@ -429,9 +767,46 @@ export function parseFeeds3Items(
           log('DEBUG', `parseFeeds3Items: curkey calculated from formula: ${likeCurkey}`);
         }
       }
+
+      // B 站等外链：无内嵌 video 时用 likeUnikey 作为视频链接，便于下游展示
+      if (isBilibili && videos.length === 0 && likeUnikey) {
+        videos.push({
+          videoId: 'bilibili_link',
+          coverUrl: '',
+          videoUrl: likeUnikey,
+        });
+      }
     }
 
     const timestamp = abstime || (matchedBlock?.timestamp ?? 0);
+
+    // 过滤掉占位图片（如 /ac/b.gif）和视频封面
+    let filteredImages = images.filter((url: string) =>
+      url.startsWith('http') && !videoCoverUrls.some(cover => url.includes(cover) || cover.includes(url))
+    );
+    // 优先保留可访问的 a1.qpic.cn（无 Cookie 时 photo.store 常 404）
+    if (filteredImages.some((u) => u.includes('a1.qpic.cn'))) {
+      filteredImages = filteredImages.filter((u) => u.includes('a1.qpic.cn'));
+    }
+    let filteredPicsMeta = picsMeta.filter((p) =>
+      p.url?.startsWith('http') && !videoCoverUrls.some(cover => p.url!.includes(cover) || cover.includes(p.url!))
+    );
+    if (filteredImages.some((u) => u.includes('a1.qpic.cn'))) {
+      filteredPicsMeta = filteredPicsMeta.filter((p) => p.url?.includes('a1.qpic.cn'));
+    }
+
+    // #region agent log
+    debugIngest('item summary', {
+      tid,
+      uin: dataUin,
+      contentLen: content.length,
+      contentSnippet: content.slice(0, 60),
+      imagesRaw: images.length,
+      filteredPicCount: filteredImages.length,
+      videoCount: videos.length,
+      regionCurrentLen: regionCurrentDecoded.length,
+    }, 'H5');
+    // #endregion
 
     // 评论/拉评论接口需要 key（hex 或短 key）；当 data-tid 为纯数字（abstime）时优先用 data-fkey，否则块内 data-key/key:
     let canonicalTid = tid;
@@ -459,9 +834,10 @@ export function parseFeeds3Items(
     const item: Record<string, unknown> = {
       tid: canonicalTid, uin: dataUin, nickname, content,
       created_time: timestamp, createTime: formatTimestampToReadable(timestamp), createTime2: formatTimestampToReadable(timestamp),
-      cmtnum, fwdnum: isForward ? 1 : 0,
-      pic: images.map(u => ({ url: u })),
-      picsMeta: picsMeta.length > 0 ? picsMeta : undefined,
+      cmtnum, likenum, fwdnum: isForward ? 1 : 0,
+      pic: filteredImages.map(u => ({ url: u })),
+      picsMeta: filteredPicsMeta.length > 0 ? filteredPicsMeta : undefined,
+      video: videos.length > 0 ? videos : undefined,
       appid,
       typeid,
       appName,
@@ -559,7 +935,7 @@ export function parseFeeds3Items(
       const jsItem: Record<string, unknown> = {
         tid, uin: feedUin, nickname: jsNickname, content: jsContent,
         created_time: jsAbstime, createTime: formatTimestampToReadable(jsAbstime), createTime2: formatTimestampToReadable(jsAbstime),
-        cmtnum: 0, fwdnum: jsIsForward ? 1 : 0, pic: [],
+        cmtnum: 0, likenum: 0, fwdnum: jsIsForward ? 1 : 0, pic: [],
         appid,
         _source: 'feeds3',
       };
@@ -936,6 +1312,21 @@ function stripHtmlTags(html: string): string {
   const withEmojis = extractEmojisFromHtml(html);
   // 再清理所有 HTML 标签
   return withEmojis.replace(/<[^>]+>/g, '');
+}
+
+/**
+ * 从正文 HTML 中提取可展示文本（含 QQ 表情 img → [em]eXXX[/em] → 转名如 [微笑]）
+ * 用于说说正文、转发原文等，避免纯 emoji 被当成无正文。
+ */
+function extractFeedContentFromHtml(html: string): string {
+  const withEmoji = extractEmojisFromHtml(html);
+  const noTags = withEmoji
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/\\[trn]/g, '')
+    .replace(/[\t\r\n]+/g, ' ')
+    .trim();
+  return processEmojis(noTags, { mode: 'name' });
 }
 
 /**
@@ -1438,9 +1829,10 @@ export function parseFeeds3PostMeta(
       views = parseInt(viewMatch[1], 10);
     }
 
-    // 提取点赞数
+    // 提取点赞数（支持 HTML 和 JS 编码格式）
     let likeCount = 0;
-    const likeCntMatch = block.match(/class="f-like-cnt"[^>]*>(\d+)</);
+    const likeCntMatch = block.match(/class="f-like-cnt"[^>]*>(\d+)</)
+      || block.match(/\\x3C[^>]*f-like-cnt[^>]*>(\d+)\\x3C/i);
     if (likeCntMatch) {
       likeCount = parseInt(likeCntMatch[1], 10);
     }

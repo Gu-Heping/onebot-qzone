@@ -209,7 +209,7 @@ const cases: TestCase[] = [
     fn: () => {
       const conlist = [{ type: 2, con: '[em]e10271[/em]' }];
       const out = rebuildContentFromConlist(conlist);
-      assert(out === '[em]e10271[/em]', '应保留表情标记');
+      assert(out === '[吃瓜]', 'type 2 应转为表情名');
     },
   },
   {
@@ -221,7 +221,7 @@ const cases: TestCase[] = [
         { type: 2, con: '[em]e100[/em]' },
       ];
       const out = rebuildContentFromConlist(conlist);
-      assert(out === '@Bob 你好呀 [em]e100[/em]', '混合应正确拼接');
+      assert(out === '@Bob 你好呀 [微笑]', '混合应正确拼接（表情转名）');
     },
   },
   {

@@ -119,9 +119,9 @@ export function rebuildContentFromConlist(
   for (const item of conlist) {
     const type = Number(item['type'] ?? -1);
     if (type === 0) {
-      // @人: 使用 nick 或 name
+      // @人: 使用 nick 或 name；缺 nick 时仍保留 @ 前缀
       const nick = String(item['nick'] ?? item['name'] ?? '');
-      if (nick) parts.push(`@${nick}`);
+      parts.push(nick ? `@${nick}` : '@');
     } else if (type === 2) {
       // 含表情的文本: 处理表情转换
       const con = String(item['con'] ?? item['content'] ?? '');
@@ -168,7 +168,7 @@ export function normalizeEmotion(raw: Record<string, unknown>, selfUin: string):
     ));
   }
 
-  const createdTime = safeInt(raw['created_time'] ?? raw['ctime'] ?? raw['pubtime'] ?? 0);
+  const createdTime = safeInt(raw['created_time'] ?? raw['createTime'] ?? raw['ctime'] ?? raw['pubtime'] ?? 0);
   const cmtnum = safeInt(raw['cmtnum'] ?? raw['commentcnt'] ?? 0);
   const fwdnum = safeInt(raw['fwdnum'] ?? raw['forwardcnt'] ?? 0);
   let pics: string[] = extractImages(raw['pic'] ?? raw['media'] ?? []);
@@ -367,6 +367,7 @@ function buildCommentEvent(comment: QzoneComment, postUin: string, postTid: stri
   if (comment.isReply) ev._is_reply = true;
   if (comment.replyToUin) ev._reply_to_uin = comment.replyToUin;
   if (comment.replyToNickname) ev._reply_to_nickname = comment.replyToNickname;
+  if (comment.replyToCommentId) ev._reply_to_comment_id = comment.replyToCommentId;
   if (comment.parentCommentId) ev._parent_comment_id = comment.parentCommentId;
   return ev;
 }
@@ -423,6 +424,10 @@ export class EventPoller {
     private readonly hub: EventHub,
     private readonly config: BridgeConfig,
   ) {}
+
+  private logEventDebug(msg: string): void {
+    if (this.config.eventDebug) console.log(msg);
+  }
 
   private get seenTidsFile(): string {
     return join(this.config.cachePath, 'seen_post_tids.json');
@@ -680,40 +685,26 @@ export class EventPoller {
 
     if (!this.config.emitMessageEvents) return;
 
-    const source = this.config.eventPollSource;
     let items: NormalizedItem[] = [];
+    try {
+      const res = await this.client.getEmotionList(selfId, 0, 20);
+      const raw = Array.isArray(res['msglist']) ? (res['msglist'] as Record<string, unknown>[]) : [];
+      items = raw.map(r => normalizeEmotion(r, selfId));
+    } catch { /* skip */ }
 
-    if (source === 'mobile' || source === 'auto') {
-      try {
-        const res = await this.client.getMobileMoodList(selfId, 0, 20);
-        const raw = Array.isArray(res['data'])
-          ? (res['data'] as Record<string, unknown>[])
-          : Array.isArray(res['msglist']) ? (res['msglist'] as Record<string, unknown>[]) : [];
-        items = raw.map(r => normalizeEmotion(r, selfId));
-      } catch { /* try pc */ }
-    }
-
-    if ((source === 'pc' || (source === 'auto' && items.length === 0))) {
-      try {
-        const res = await this.client.getEmotionList(selfId, 0, 20);
-        const raw = Array.isArray(res['msglist']) ? (res['msglist'] as Record<string, unknown>[]) : [];
-        items = raw.map(r => normalizeEmotion(r, selfId));
-      } catch { /* skip */ }
-    }
-
-    console.log(`[Poller:DEBUG] pollMyPosts got ${items.length} items, seenTids=${this.seenPostTids.size}, trackTids=${this.trackTids.size}`);
+    this.logEventDebug(`[Poller:DEBUG] pollMyPosts got ${items.length} items, seenTids=${this.seenPostTids.size}, trackTids=${this.trackTids.size}`);
     for (const item of items) {
       if (!item.tid) continue;
       this.cacheNormalizedItem(item);
       const isNew = !this.seenPostTids.has(item.tid);
-      console.log(`[Poller:DEBUG] item tid=${item.tid?.slice(0,16)}, isNew=${isNew}`);
+      this.logEventDebug(`[Poller:DEBUG] item tid=${item.tid?.slice(0,16)}, isNew=${isNew}`);
       if (isNew) {
         this.markSeenTid(item.tid);
         this.trackTids.add(item.tid);
         const event = buildPostEvent(item, selfId);
-        console.log(`[Poller:DEBUG] publishing event type=${event.post_type}`);
+        this.logEventDebug(`[Poller:DEBUG] publishing event type=${event.post_type}`);
         await this.hub.publish(event);
-        console.log(`[Poller:DEBUG] publish done, subscribers=${this.hub.subscriberCount()}`);
+        this.logEventDebug(`[Poller:DEBUG] publish done, subscribers=${this.hub.subscriberCount()}`);
       }
     }
 
@@ -762,18 +753,18 @@ export class EventPoller {
       if (Array.isArray(v)) { rawComments.push(...(v as Record<string, unknown>[])); break; }
     }
 
-    console.log(`[Poller:DEBUG] pollComments tid=${tid.slice(0,8)} got ${rawComments.length} comments`);
+    this.logEventDebug(`[Poller:DEBUG] pollComments tid=${tid.slice(0,8)} got ${rawComments.length} comments`);
     if (rawComments.length > 0) {
       for (const raw of rawComments) {
         const comment = normalizeComment(raw);
         if (!comment.commentId) continue;
         if (!this.seenCommentIds.has(tid)) this.seenCommentIds.set(tid, new Set());
         const isNew = !this.seenCommentIds.get(tid)!.has(comment.commentId);
-        console.log(`[Poller:DEBUG] comment id=${comment.commentId.slice(0,16)}, isNew=${isNew}`);
+        this.logEventDebug(`[Poller:DEBUG] comment id=${comment.commentId.slice(0,16)}, isNew=${isNew}`);
         if (isNew) {
           this.seenCommentIds.get(tid)!.add(comment.commentId);
           const event = buildCommentEvent(comment, selfUin, tid, selfUin);
-          console.log(`[Poller:DEBUG] publishing comment event`);
+          this.logEventDebug(`[Poller:DEBUG] publishing comment event`);
           await this.hub.publish(event);
         }
       }
