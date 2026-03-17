@@ -1,4 +1,6 @@
 import 'dotenv/config';
+import fs from 'node:fs';
+import path from 'node:path';
 import { fromEnv, buildClient } from './bridge/config.js';
 import { EventHub } from './bridge/hub.js';
 import { EventPoller } from './bridge/poller.js';
@@ -27,6 +29,16 @@ const G = '\x1b[32m', R = '\x1b[31m', Y = '\x1b[33m', C = '\x1b[36m', W = '\x1b[
 async function main(): Promise<void> {
   const config = fromEnv();
   const client = buildClient(config);
+
+  try {
+    const debugLogPath = path.join(config.cachePath, 'debug.log');
+    fs.appendFileSync(debugLogPath, JSON.stringify({
+      location: 'main.ts:startup',
+      message: 'bridge started',
+      data: { cachePath: config.cachePath },
+      timestamp: Date.now(),
+    }) + '\n');
+  } catch (_) {}
 
   log('INFO', 'QZone Bridge v2.0 (TypeScript) 启动...');
 
@@ -188,5 +200,15 @@ async function main(): Promise<void> {
 
 main().catch(err => {
   console.error('[FATAL]', err);
+  try {
+    const cachePath = process.env['QZONE_CACHE_PATH'] ?? process.cwd();
+    const debugLogPath = path.join(cachePath, 'debug.log');
+    fs.appendFileSync(debugLogPath, JSON.stringify({
+      location: 'main.ts:fatal',
+      message: 'process exiting',
+      data: { error: String(err), stack: err instanceof Error ? err.stack : undefined },
+      timestamp: Date.now(),
+    }) + '\n');
+  } catch (_) {}
   process.exit(1);
 });

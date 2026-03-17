@@ -713,10 +713,16 @@ export class ActionHandler {
         try {
           const { data, contentType } = await this.client.fetchImageWithAuth(url);
           const obj = typeof entry === 'object' && entry ? entry : { url };
-          (obj as Record<string, unknown>)['base64'] = data.toString('base64');
+          const b64 = data.toString('base64');
+          (obj as Record<string, unknown>)['base64'] = b64;
           (obj as Record<string, unknown>)['content_type'] = contentType;
           perPost++;
           totalFetched++;
+          // #region agent log
+          if (totalFetched === 1) {
+            debugLog(this.config.cachePath, { location: 'actions.ts:enrichMsglistWithImageData', message: 'first fetch ok', data: { totalFetched, base64Len: b64.length }, timestamp: Date.now(), hypothesisId: 'H2' });
+          }
+          // #endregion
         } catch (e) {
           // #region agent log
           debugLog(this.config.cachePath, { location: 'actions.ts:enrichMsglistWithImageData', message: 'fetchImageWithAuth failed', data: { url: url.slice(0, 90), err: String(e) }, timestamp: Date.now(), hypothesisId: 'H4' });
@@ -724,6 +730,21 @@ export class ActionHandler {
         }
       }
     }
+    // #region agent log
+    let sampleBase64Len = 0;
+    for (const item of msglist!) {
+      const pic = item['pic'] as Array<unknown> | undefined;
+      if (Array.isArray(pic) && pic.length > 0) {
+        const first = pic[0];
+        const b64 = typeof first === 'object' && first && (first as Record<string, unknown>)['base64'];
+        if (typeof b64 === 'string') {
+          sampleBase64Len = b64.length;
+          break;
+        }
+      }
+    }
+    debugLog(this.config.cachePath, { location: 'actions.ts:enrichMsglistWithImageData', message: 'enrich done', data: { totalFetched, sampleBase64Len }, timestamp: Date.now(), hypothesisId: 'H3' });
+    // #endregion
   }
 
   // ── util ─────────────────────────────────────────
