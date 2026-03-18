@@ -35,6 +35,8 @@ export interface BridgeConfig {
 
   // Paths
   cachePath: string;
+  /** 仅图片拉取走代理（如 http://127.0.0.1:7890），未设置则直连 */
+  imageProxyUrl?: string;
 }
 
 function parseUrls(raw: string): string[] {
@@ -70,9 +72,10 @@ export function fromEnv(): BridgeConfig {
                                 : 'auto'),
     attachImageDataInEvents:  !['0', 'false', 'no'].includes((e['ONEBOT_ATTACH_IMAGE_DATA'] ?? '1').toLowerCase()),
     cachePath:                e['QZONE_CACHE_PATH'] ?? './test_cache',
+    imageProxyUrl:            e['QZONE_IMAGE_PROXY'] ?? undefined,
   };
 }
 
 export function buildClient(cfg: BridgeConfig): QzoneClient {
-  return new QzoneClient({ cachePath: cfg.cachePath });
+  return new QzoneClient({ cachePath: cfg.cachePath, imageProxyUrl: cfg.imageProxyUrl });
 }

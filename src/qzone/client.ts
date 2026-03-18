@@ -33,14 +33,88 @@ import {
   extractExternparam as _extractExternparam,
 } from './feeds3Parser.js';
 import type { Feeds3Like } from './feeds3Parser.js';
+import https from 'node:https';
 import { launchPlaywright } from './playwrightHelper.js';
 import { convertNamesToEmojis } from './emoji.js';
+
+// ──────────────────────────────────────────────
+// fetchImageWithAuth 辅助
+// ──────────────────────────────────────────────
+// TLS：ciphers/ALPN 已固定；如需更接近浏览器可考虑 sigalgs、ecdhCurve（Node 文档建议 ciphers 仅必要时使用，此处仅作排障/调优备注，不默认开启）
+const IMAGE_HTTPS_AGENT = new https.Agent({
+  keepAlive: false,
+  maxSockets: 8,
+  minVersion: 'TLSv1.2' as const,
+  maxVersion: 'TLSv1.3' as const,
+  ciphers: [
+    'TLS_AES_128_GCM_SHA256',
+    'TLS_AES_256_GCM_SHA384',
+    'TLS_CHACHA20_POLY1305_SHA256',
+    'ECDHE-ECDSA-AES128-GCM-SHA256',
+    'ECDHE-RSA-AES128-GCM-SHA256',
+    'ECDHE-ECDSA-AES256-GCM-SHA384',
+    'ECDHE-RSA-AES256-GCM-SHA384',
+  ].join(':'),
+  ALPNProtocols: ['http/1.1'],
+  rejectUnauthorized: true,
+});
+
+const PROXY_HEADERS_DROP = new Set([
+  'proxy-connection', 'connection', 'keep-alive', 'transfer-encoding', 'te', 'trailer', 'upgrade',
+  'x-forwarded-for', 'x-forwarded-proto', 'x-forwarded-host', 'forwarded', 'via',
+  'x-real-ip', 'client-ip', 'x-cluster-client-ip', 'true-client-ip', 'cf-connecting-ip',
+]);
+
+function stripProxyHeaders(headers: Record<string, string>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(headers)) {
+    if (!PROXY_HEADERS_DROP.has(k.toLowerCase())) out[k] = v;
+  }
+  return out;
+}
+
+function buildProxyFromUrl(proxyUrl: string): { protocol: string; host: string; port: number; auth?: { username: string; password: string } } {
+  const u = new URL(proxyUrl);
+  const result: { protocol: string; host: string; port: number; auth?: { username: string; password: string } } = {
+    protocol: u.protocol.replace(':', ''),
+    host: u.hostname,
+    port: Number(u.port),
+  };
+  if (u.username) {
+    result.auth = {
+      username: decodeURIComponent(u.username),
+      password: decodeURIComponent(u.password),
+    };
+  }
+  return result;
+}
+
+function isRetryableNetworkError(err: unknown): boolean {
+  const rec = err as Record<string, unknown>;
+  const code = rec?.code as string | undefined;
+  const msg = String(rec?.message ?? '');
+  const status = rec?.response && typeof (rec.response as Record<string, unknown>)?.status === 'number'
+    ? (rec.response as Record<string, unknown>).status as number
+    : undefined;
+  if (['ECONNRESET', 'ECONNREFUSED', 'ETIMEDOUT', 'ECONNABORTED', 'EPIPE', 'EPROTO', 'UND_ERR_SOCKET'].includes(code ?? '')) return true;
+  if (status === 502 || /502/i.test(msg)) return true;
+  if (/Client network socket disconnected before secure TLS connection was established/i.test(msg)) return true;
+  if (/socket hang up/i.test(msg)) return true;
+  if (/TLS/i.test(msg) && /disconnect/i.test(msg)) return true;
+  return false;
+}
+
+function sleepMs(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
 
 // ──────────────────────────────────────────────
 // QzoneConfig
 // ──────────────────────────────────────────────
 export interface QzoneConfig {
   cachePath: string;
+  /** 仅图片拉取走代理（如 http://127.0.0.1:7890），未设置则直连 */
+  imageProxyUrl?: string;
 }
 
 function defaultConfig(cfg?: Partial<QzoneConfig>): QzoneConfig {
@@ -359,36 +433,94 @@ export class QzoneClient {
   /**
    * 使用当前 Cookie + Referer 拉取图片（用于 QZone CDN 需鉴权的 URL）。
    * 仅应在白名单 URL 上调用，避免 SSRF。
+   * 使用固定 TLS/ALPN 的独立 https.Agent；若配置了 imageProxyUrl 则走 Axios 内置 proxy，
+   * 否则关闭环境变量代理（proxy: false），确保代理路径单一。
    */
   async fetchImageWithAuth(url: string): Promise<{ data: Buffer; contentType: string }> {
-    const options: AxiosRequestConfig = {};
+    // #region agent log
+    try {
+      const payload = { location: 'client.ts:fetchImageWithAuth', message: 'proxy config', data: { hasImageProxyUrl: !!this.config.imageProxyUrl, imageProxyPrefix: this.config.imageProxyUrl ? this.config.imageProxyUrl.slice(0, 28) : null }, timestamp: Date.now(), hypothesisId: 'H1' as const };
+      fs.appendFileSync(path.join(this.config.cachePath, 'debug.log'), JSON.stringify(payload) + '\n');
+    } catch (_) {}
+    // #endregion
+    // photo.store.qq.com 对 HTTP 常返回 502，统一用 HTTPS 请求
+    const requestUrl = url.includes('photo.store.qq.com') && url.startsWith('http://')
+      ? url.replace(/^http:\/\//i, 'https://')
+      : url;
+    const headers: Record<string, string> = {
+      'Referer': 'https://user.qzone.qq.com/',
+      'User-Agent': this.getRandomizedUserAgent(),
+      'Accept': 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
+      'Accept-Language': this.getRandomizedAcceptLanguage(),
+      'Sec-Fetch-Dest': 'image',
+      'Sec-Fetch-Mode': 'no-cors',
+      'Sec-Fetch-Site': 'cross-site',
+      'Cache-Control': 'no-cache',
+      'Pragma': 'no-cache',
+    };
     if (this.cookies && Object.keys(this.cookies).length > 0) {
       const cookieStr = Object.entries(this.cookies)
         .map(([k, v]) => `${k}=${v}`)
         .join('; ');
-      if (cookieStr) options.headers = { ...options.headers, Cookie: cookieStr };
+      if (cookieStr) headers['Cookie'] = cookieStr;
     }
-    options.headers = { ...options.headers, Referer: 'https://user.qzone.qq.com/' };
-    options.responseType = 'arraybuffer';
-    const resp = await this.http.request({ method: 'GET', url, ...options });
-    this._syncMapFromJar();
-    const data = Buffer.from(resp.data as ArrayBuffer);
-    // #region agent log
-    if (resp.status !== 200 || data.length === 0) {
-      const payload = { location: 'client.ts:fetchImageWithAuth', message: 'non-200 or empty', data: { status: resp.status, dataLen: data.length, urlPrefix: url.slice(0, 70) }, timestamp: Date.now(), hypothesisId: 'H4' as const };
+    const requestHeaders = stripProxyHeaders(headers);
+    const debugTls = process.env['QZONE_IMAGE_DEBUG_TLS'] === '1';
+    const httpsAgent = debugTls
+      ? new https.Agent({
+          keepAlive: false, maxSockets: 8,
+          minVersion: 'TLSv1.2' as const, maxVersion: 'TLSv1.3' as const,
+          ciphers: IMAGE_HTTPS_AGENT.options.ciphers as string,
+          ALPNProtocols: ['http/1.1'], rejectUnauthorized: true, enableTrace: true,
+        })
+      : IMAGE_HTTPS_AGENT;
+    const requestConfig: AxiosRequestConfig = {
+      headers: requestHeaders,
+      responseType: 'arraybuffer',
+      httpsAgent,
+      timeout: 15000,
+      validateStatus: (status: number) => status >= 200 && status < 400,
+      maxRedirects: 0,
+    };
+    if (this.config.imageProxyUrl) {
+      requestConfig.proxy = buildProxyFromUrl(this.config.imageProxyUrl);
+    } else {
+      requestConfig.proxy = false;
+    }
+    const httpClient = axios.create({
+      timeout: 15000,
+      validateStatus: (s: number) => s >= 200 && s < 400,
+      transitional: { clarifyTimeoutError: true },
+    });
+    const retries = 3;
+    let lastErr: unknown;
+    for (let attempt = 0; attempt <= retries; attempt++) {
       try {
-        fs.appendFileSync(path.join(this.config.cachePath, 'debug.log'), JSON.stringify(payload) + '\n');
-      } catch (_) {}
-      fetch('http://127.0.0.1:7242/ingest/8be6e162-8615-4320-91d6-a9ff0807a9c9', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }).catch(() => {});
+        const resp = await httpClient.get(requestUrl, requestConfig);
+        const data = Buffer.from(resp.data as ArrayBuffer);
+        if (data.length === 0) {
+          throw new Error(`fetchImageWithAuth: ${resp.status} or empty body`);
+        }
+        const contentType = (resp.headers && resp.headers['content-type'])
+          ? String(resp.headers['content-type']).split(';')[0]!.trim()
+          : 'image/jpeg';
+        return { data, contentType };
+      } catch (err: unknown) {
+        lastErr = err;
+        const retryable = isRetryableNetworkError(err);
+        const finalAttempt = attempt >= retries;
+        if (!retryable || finalAttempt) {
+          // #region agent log
+          const payload = { location: 'client.ts:fetchImageWithAuth', message: 'non-200 or empty', data: { status: (err as Record<string, unknown>)?.response ? ((err as Record<string, unknown>).response as Record<string, unknown>)?.status : null, attempts: attempt + 1, urlPrefix: url.slice(0, 70), errMsg: String((err as Error)?.message ?? '').slice(0, 120) }, timestamp: Date.now(), hypothesisId: 'H4' as const };
+          try { fs.appendFileSync(path.join(this.config.cachePath, 'debug.log'), JSON.stringify(payload) + '\n'); } catch (_) {}
+          // #endregion
+          throw err;
+        }
+        const backoff = 250 * Math.pow(2, attempt) + Math.floor(Math.random() * 120);
+        await sleepMs(backoff);
+      }
     }
-    // #endregion
-    if (resp.status !== 200 || data.length === 0) {
-      throw new Error(`fetchImageWithAuth: ${resp.status} or empty body`);
-    }
-    const contentType = (resp.headers && resp.headers['content-type'])
-      ? String(resp.headers['content-type']).split(';')[0]!.trim()
-      : 'image/jpeg';
-    return { data, contentType };
+    throw lastErr;
   }
 
   /**
