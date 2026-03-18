@@ -288,6 +288,8 @@ QZONE_PLAYWRIGHT_HEADLESS=1 npm run dev
 
 **说说图片与 base64**：默认情况下，`get_emotion_list` / `get_friend_feeds` 会在每条说说的 `pic` 项中附带 `base64`（桥接用 Cookie+Referer 向 QZone CDN 拉取），单条最多 5 张、单次响应最多 20 张；传 `include_image_data=false` 可关闭以省流量。推送的新说说事件中也会默认附带图片 base64（`message` 中 image 段带 `file: 'base64://...'`），可通过环境变量 `ONEBOT_ATTACH_IMAGE_DATA=0` 关闭。单独拉取某张图时可用 `fetch_image`（参数 `url` 或 `urls`），仅接受白名单域名。
 
+**与 openclaw-napcat-qq 配合**：搭配 [openclaw-napcat-qq](https://github.com/Gu-Heping/openclaw-napcat-qq) 时，插件会将上述 base64 写入临时文件并在 `qzone_get_friend_feeds` / `qzone_get_posts` 结果中返回**本地路径**，Agent 用 **image** 工具传入该路径即可识图。若图片拉取出现 502，请将腾讯 CDN 域名（如 `photo.store.qq.com`、`qpic.cn`、`qzonestyle.gtimg.cn`）设为代理 **DIRECT**，详见 [docs/SERVER_DEBUG.md](docs/SERVER_DEBUG.md)。
+
 ---
 
 ## NapCat 原生插件
