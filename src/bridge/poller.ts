@@ -888,14 +888,7 @@ export class EventPoller {
       if (delta > 0) {
         if (type === 'comment') {
           prev.comment = count;
-          // 尝试从缓存获取评论用户信息（如果有）
-          for (let i = 0; i < delta; i++) {
-            const event = buildCommentEvent(
-              { commentId: `opcnt_${Date.now()}_${i}`, uin: '', nickname: '', content: '[计数增加]', createdTime: now() },
-              selfUin, tid, selfUin,
-            );
-            await this.hub.publish(event);
-          }
+          this.logEventDebug(`[Poller:DEBUG] comment count increased tid=${tid.slice(0,8)} delta=${delta}, skip synthetic comment event`);
         } else {
           prev.like = count;
           // 尝试从 pendingLikeUsers 获取用户信息
