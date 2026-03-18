@@ -1,6 +1,7 @@
 import https from 'node:https';
 import path from 'node:path';
 import fs from 'node:fs';
+import pLimit from 'p-limit';
 import { QzoneClient } from '../qzone/client.js';
 
 // #region agent log
@@ -118,6 +119,19 @@ function formatTimestampToReadable(ts: number): string {
 
 const MAX_IMAGE_DATA_PER_POST = 5;
 const MAX_IMAGE_DATA_PER_RESPONSE = 20;
+const SEND_IMAGE_FETCH_CONCURRENCY = 3;
+const SEND_IMAGE_MAX_BYTES = 15 * 1024 * 1024;
+const SEND_IMAGE_FETCH_RETRIES = 2;
+
+function isSupportedImageBuffer(buffer: Buffer): boolean {
+  if (buffer.length < 12) return false;
+  if (buffer.subarray(0, 3).equals(Buffer.from([0xff, 0xd8, 0xff]))) return true;
+  if (buffer.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return true;
+  if (buffer.subarray(0, 6).toString('ascii') === 'GIF87a' || buffer.subarray(0, 6).toString('ascii') === 'GIF89a') return true;
+  if (buffer.subarray(0, 4).toString('ascii') === 'RIFF' && buffer.subarray(8, 12).toString('ascii') === 'WEBP') return true;
+  if (buffer.subarray(0, 2).toString('ascii') === 'BM') return true;
+  return false;
+}
 
 /** 为 get_emotion_list 返回的 msglist 中每条补充 createTime/createTime2（便于 AI/客户端展示，避免仅显示时间戳） */
 function ensureReadableTimeOnMsglist(res: Record<string, unknown>): void {
@@ -234,20 +248,16 @@ export class ActionHandler {
     if (!this.client.loggedIn) return fail(1401, '未登录', echo);
     const segs = parseMessageSegments(p['message']);
     let text = '';
-    const images: string[] = [];
+    const imageTasks: Array<Promise<string | null>> = [];
+    const fetchLimit = pLimit(SEND_IMAGE_FETCH_CONCURRENCY);
     for (const seg of segs) {
       if (seg.type === 'text') text += seg.data['text'] ?? '';
       else if (seg.type === 'image') {
-        const url = seg.data['url'] ?? seg.data['file'] ?? '';
-        if (url.startsWith('base64://') || url.startsWith('data:')) images.push(url.replace(/^base64:\/\//, '').replace(/^data:[^,]+,/, ''));
-        else if (isSafeUrl(url)) images.push(await this.fetchImageBase64(url));
-        else if (url && !url.startsWith('http')) {
-          // local file path
-          const safePath = path.resolve(this.config.cachePath, path.basename(url));
-          if (fs.existsSync(safePath)) images.push(fs.readFileSync(safePath, 'base64'));
-        }
+        const source = seg.data['url'] ?? seg.data['file'] ?? '';
+        imageTasks.push(fetchLimit(() => this.resolveImageBase64(source)));
       }
     }
+    const images = (await Promise.all(imageTasks)).filter((image): image is string => !!image);
 
     const whoCanSee = p['who_can_see'] !== undefined ? safeInt(p['who_can_see']) : undefined;
     const [tid, picIds] = await this.client.publish(text, images.length ? images : undefined, whoCanSee);
@@ -554,7 +564,7 @@ export class ActionHandler {
       b64 = await this.fetchImageBase64(String(p['url']));
     }
     if (!b64) return fail(1400, '缺少 base64 或 url', echo);
-    b64 = b64.replace(/^base64:\/\//, '').replace(/^data:[^,]+,/, '');
+    b64 = this.normalizeAndValidateImageBase64(b64, String(p['url'] ?? p['file'] ?? 'upload_image'));
     const albumId = p['album_id'] ? String(p['album_id']) : undefined;
     const res = await this.client.uploadImage(b64, albumId);
     return ok(res, echo);
@@ -749,14 +759,103 @@ export class ActionHandler {
 
   // ── util ─────────────────────────────────────────
   private fetchImageBase64(url: string): Promise<string> {
-    return new Promise((resolve, reject) => {
-      const mod = url.startsWith('https') ? https : (require('node:http') as typeof https);
-      mod.get(url, { timeout: 15000 }, (res) => {
-        const chunks: Buffer[] = [];
-        res.on('data', (c: Buffer) => chunks.push(c));
-        res.on('end', () => resolve(Buffer.concat(chunks).toString('base64')));
-        res.on('error', reject);
-      }).on('error', reject);
-    });
+    return this.fetchImageBuffer(url).then(buffer => buffer.toString('base64'));
+  }
+
+  private async resolveImageBase64(source: string): Promise<string | null> {
+    if (!source) return null;
+    if (source.startsWith('base64://') || source.startsWith('data:')) {
+      return this.normalizeAndValidateImageBase64(source, source.slice(0, 64));
+    }
+    if (isSafeUrl(source)) {
+      return this.fetchImageBase64(source);
+    }
+    const localPath = this.resolveLocalImagePath(source);
+    if (!localPath) return null;
+    return this.normalizeAndValidateImageBuffer(fs.readFileSync(localPath), localPath).toString('base64');
+  }
+
+  private resolveLocalImagePath(source: string): string | null {
+    let localSource = source;
+    if (localSource.startsWith('file://')) {
+      try {
+        localSource = decodeURIComponent(new URL(localSource).pathname);
+      } catch {
+        return null;
+      }
+      if (/^\/[A-Za-z]:\//.test(localSource)) localSource = localSource.slice(1);
+    }
+
+    const candidates = [
+      path.resolve(localSource),
+      path.resolve(this.config.cachePath, localSource),
+      path.resolve(this.config.cachePath, path.basename(localSource)),
+    ];
+    for (const candidate of candidates) {
+      if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) return candidate;
+    }
+    return null;
+  }
+
+  private async fetchImageBuffer(url: string): Promise<Buffer> {
+    let lastError: unknown;
+    for (let attempt = 0; attempt <= SEND_IMAGE_FETCH_RETRIES; attempt++) {
+      try {
+        const buffer = await new Promise<Buffer>((resolve, reject) => {
+          const mod = url.startsWith('https') ? https : (require('node:http') as typeof https);
+          const req = mod.get(url, { timeout: 15000 }, (res) => {
+            if ((res.statusCode ?? 0) >= 400) {
+              reject(new Error(`HTTP ${res.statusCode}`));
+              res.resume();
+              return;
+            }
+            const contentLength = Number(res.headers['content-length'] ?? 0);
+            if (contentLength > SEND_IMAGE_MAX_BYTES) {
+              reject(new Error(`image too large: ${contentLength} bytes`));
+              res.resume();
+              return;
+            }
+            const chunks: Buffer[] = [];
+            let total = 0;
+            res.on('data', (chunk: Buffer) => {
+              total += chunk.length;
+              if (total > SEND_IMAGE_MAX_BYTES) {
+                req.destroy(new Error(`image too large: ${total} bytes`));
+                return;
+              }
+              chunks.push(chunk);
+            });
+            res.on('end', () => resolve(Buffer.concat(chunks)));
+            res.on('error', reject);
+          });
+          req.on('timeout', () => req.destroy(new Error('image fetch timeout')));
+          req.on('error', reject);
+        });
+        return this.normalizeAndValidateImageBuffer(buffer, url, false);
+      } catch (error) {
+        lastError = error;
+        if (attempt >= SEND_IMAGE_FETCH_RETRIES) break;
+        await new Promise(resolve => setTimeout(resolve, 300 * (attempt + 1)));
+      }
+    }
+    throw lastError instanceof Error ? lastError : new Error(String(lastError));
+  }
+
+  private normalizeAndValidateImageBase64(rawBase64: string, sourceLabel: string): string {
+    const normalized = rawBase64.replace(/^base64:\/\//, '').replace(/^data:[^,]+,/, '');
+    const buffer = Buffer.from(normalized, 'base64');
+    return this.normalizeAndValidateImageBuffer(buffer, sourceLabel).toString('base64');
+  }
+
+  private normalizeAndValidateImageBuffer(buffer: Buffer, sourceLabel: string, cloneBuffer = true): Buffer {
+    const normalized = cloneBuffer ? Buffer.from(buffer) : buffer;
+    if (!normalized.length) throw new Error(`图片为空: ${sourceLabel}`);
+    if (normalized.length > SEND_IMAGE_MAX_BYTES) {
+      throw new Error(`图片过大(${normalized.length} bytes): ${sourceLabel}`);
+    }
+    if (!isSupportedImageBuffer(normalized)) {
+      throw new Error(`不支持的图片格式: ${sourceLabel}`);
+    }
+    return normalized;
   }
 }

@@ -7,6 +7,7 @@ import path from 'node:path';
 import { URL } from 'node:url';
 import axios, { type AxiosInstance, type AxiosRequestConfig } from 'axios';
 import { wrapper } from 'axios-cookiejar-support';
+import pLimit from 'p-limit';
 import { CookieJar } from 'tough-cookie';
 import {
   calcGtk,
@@ -36,6 +37,9 @@ import type { Feeds3Like } from './feeds3Parser.js';
 import https from 'node:https';
 import { launchPlaywright } from './playwrightHelper.js';
 import { convertNamesToEmojis } from './emoji.js';
+
+const PUBLISH_IMAGE_UPLOAD_CONCURRENCY = 3;
+const UPLOAD_IMAGE_RETRY_COUNT = 2;
 
 // ──────────────────────────────────────────────
 // fetchImageWithAuth 辅助
@@ -152,6 +156,7 @@ export class QzoneClient {
 
   /** feeds3 HTML 中解析出的评论：postTid → comment records（每次 getEmotionListViaFeeds3 刷新） */
   feeds3Comments = new Map<string, Record<string, unknown>[]>();
+  private feeds3CommentsFetchedAt = new Map<string, number>();
 
   /** feeds3 HTML 中解析出的点赞：postTid → Feeds3Like[]（每次 getEmotionListViaFeeds3 刷新） */
   feeds3Likes = new Map<string, Feeds3Like[]>();
@@ -175,6 +180,34 @@ export class QzoneClient {
 
   getPostMeta(tid: string): PostMeta | undefined {
     return this.postMetaCache.get(tid);
+  }
+
+  private mergeFeeds3Comments(
+    commentsByTid: Map<string, Record<string, unknown>[]>,
+    fetchedAt = Math.floor(Date.now() / 1000),
+  ): void {
+    for (const [postTid, cmts] of commentsByTid) {
+      const existing = this.feeds3Comments.get(postTid);
+      if (existing) {
+        const seenIds = new Set(existing.map(c => String(c['commentid'])));
+        for (const c of cmts) {
+          const commentId = String(c['commentid']);
+          if (!seenIds.has(commentId)) {
+            existing.push(c);
+            seenIds.add(commentId);
+          }
+        }
+      } else {
+        this.feeds3Comments.set(postTid, [...cmts]);
+      }
+      this.feeds3CommentsFetchedAt.set(postTid, fetchedAt);
+    }
+  }
+
+  private commentCacheAgeSeconds(tid: string): number | null {
+    const fetchedAt = this.feeds3CommentsFetchedAt.get(tid);
+    if (fetchedAt == null) return null;
+    return Math.max(0, Math.floor(Date.now() / 1000) - fetchedAt);
   }
 
   /**
@@ -1014,6 +1047,7 @@ export class QzoneClient {
     this.feeds3Cache.clear();
     this.feeds3CacheTime.clear();
     this.feeds3Comments.clear();
+    this.feeds3CommentsFetchedAt.clear();
     this.feeds3Likes.clear();
   }
 
@@ -1560,20 +1594,11 @@ export class QzoneClient {
 
       // ── 解析并缓存 feeds3 内嵌评论 ──
       this.feeds3Comments.clear();
+      this.feeds3CommentsFetchedAt.clear();
       for (const htmlText of allHtmlTexts) {
         try {
           const comments = _parseFeeds3Comments(htmlText);
-          for (const [tid, cmts] of comments) {
-            const existing = this.feeds3Comments.get(tid);
-            if (existing) {
-              const seenIds = new Set(existing.map(c => String(c['commentid'])));
-              for (const c of cmts) {
-                if (!seenIds.has(String(c['commentid']))) existing.push(c);
-              }
-            } else {
-              this.feeds3Comments.set(tid, cmts);
-            }
-          }
+          this.mergeFeeds3Comments(comments);
         } catch (e) {
           log('WARN', `parseFeeds3Comments failed: ${e}`);
         }
@@ -1838,10 +1863,35 @@ export class QzoneClient {
     return -1;
   }
 
-  async getCommentsBestEffort(uin: string, tid: string, num = 20, pos = 0): Promise<ApiResponse> {
+  async getCommentsBestEffort(
+    uin: string,
+    tid: string,
+    num = 20,
+    pos = 0,
+    options?: { forceRefresh?: boolean; maxCacheAgeSec?: number },
+  ): Promise<ApiResponse> {
     log('DEBUG', `getCommentsBestEffort: uin=${uin} tid=${tid} num=${num} pos=${pos}`);
 
+    const forceRefresh = options?.forceRefresh ?? false;
+    const maxCacheAgeSec = options?.maxCacheAgeSec ?? 90;
     let feeds3List = this.feeds3Comments.get(tid);
+    const cacheAgeSec = this.commentCacheAgeSeconds(tid);
+
+    if (
+      feeds3List
+      && feeds3List.length > 0
+      && !forceRefresh
+      && cacheAgeSec != null
+      && cacheAgeSec <= maxCacheAgeSec
+    ) {
+      const slice = feeds3List.slice(pos, pos + num);
+      return {
+        code: 0,
+        commentlist: slice,
+        _source: 'feeds3_cache',
+        _feeds3_total: feeds3List.length,
+      };
+    }
     
     // 如果缓存中没有该 tid 的评论，主动拉取 feeds3 HTML 来解析
     if (!feeds3List || feeds3List.length === 0) {
@@ -1866,17 +1916,7 @@ export class QzoneClient {
         }
         
         // 合并到缓存
-        for (const [postTid, cmts] of comments) {
-          const existing = this.feeds3Comments.get(postTid);
-          if (existing) {
-            const seenIds = new Set(existing.map(c => String(c['commentid'])));
-            for (const c of cmts) {
-              if (!seenIds.has(String(c['commentid']))) existing.push(c);
-            }
-          } else {
-            this.feeds3Comments.set(postTid, cmts);
-          }
-        }
+        this.mergeFeeds3Comments(comments);
         feeds3List = this.feeds3Comments.get(tid);
         log('DEBUG', `getCommentsBestEffort: 主动拉取后 feeds3 解析到 ${feeds3List?.length ?? 0} 条评论`);
       } catch (e) {
@@ -1966,73 +2006,79 @@ export class QzoneClient {
     this.requireLogin();
     const albumtype = albumId ? 0 : 7;
     const refer = albumId ? 'album' : 'shuoshuo';
-
-    const params = new URLSearchParams({
-      qzreferrer: this.getQzreferrer(),
-      filename: 'filename',
-      zzpanelkey: '',
-      qzonetoken: '',
-      uploadtype: '1',
-      albumtype: String(albumtype),
-      exttype: '0',
-      refer,
-      output_type: 'jsonhtml',
-      charset: 'utf-8',
-      output_charset: 'utf-8',
-      upload_hd: '1',
-      hd_width: '2048',
-      hd_height: '10000',
-      hd_quality: '96',
-      backUrls: 'http://upbak.photo.qzone.qq.com/cgi-bin/upload/cgi_upload_image',
-      url: `https://up.qzone.qq.com/cgi-bin/upload/cgi_upload_image?g_tk=${this.getGtk()}`,
-      base64: '1',
-      skey: this.cookies['skey'] ?? '',
-      zzpaneluin: this.qqNumber!,
-      uin: this.qqNumber!,
-      p_skey: this.cookies['p_skey'] ?? '',
-      jsonhtml_callback: 'callback',
-      p_uin: this.qqNumber!,
-      picfile: imageBase64,
-    });
-    if (albumId) params.set('albumid', albumId);
-
-    const url = `https://up.qzone.qq.com/cgi-bin/upload/cgi_upload_image?g_tk=${this.getGtk()}`;
-    const resp = await this.post(url, { data: params });
-    if (resp.status >= 400) throw new Error(`图片上传 HTTP ${resp.status}`);
-    const html = resp.text;
-
-    // 方式 0: parseJsonp（最通用）
-    try {
-      const parsed = parseJsonp(html, 'callback') as Record<string, unknown>;
-      if (parsed && typeof parsed === 'object') {
-        const dataObj = parsed['data'];
-        if (dataObj && typeof dataObj === 'object' && ('lloc' in dataObj || 'albumid' in dataObj)) {
-          return dataObj as UploadImageResult;
-        }
-        if ('lloc' in parsed || 'albumid' in parsed) return parsed as UploadImageResult;
-      }
-    } catch { /* fall through */ }
-
-    // 方式 1: 正则提取扁平 JSON
-    const jsonMatch = html.match(/\{[^{}]*"albumid"[^{}]*\}/s);
-    if (jsonMatch) {
+    let lastError: unknown;
+    for (let attempt = 0; attempt <= UPLOAD_IMAGE_RETRY_COUNT; attempt++) {
       try {
-        const c = JSON.parse(jsonMatch[0]) as UploadImageResult;
-        if (c.lloc || c.albumid) return c;
-      } catch { /* ignore */ }
-    }
+        const params = new URLSearchParams({
+          qzreferrer: this.getQzreferrer(),
+          filename: 'filename',
+          zzpanelkey: '',
+          qzonetoken: '',
+          uploadtype: '1',
+          albumtype: String(albumtype),
+          exttype: '0',
+          refer,
+          output_type: 'jsonhtml',
+          charset: 'utf-8',
+          output_charset: 'utf-8',
+          upload_hd: '1',
+          hd_width: '2048',
+          hd_height: '10000',
+          hd_quality: '96',
+          backUrls: 'http://upbak.photo.qzone.qq.com/cgi-bin/upload/cgi_upload_image',
+          url: `https://up.qzone.qq.com/cgi-bin/upload/cgi_upload_image?g_tk=${this.getGtk()}`,
+          base64: '1',
+          skey: this.cookies['skey'] ?? '',
+          zzpaneluin: this.qqNumber!,
+          uin: this.qqNumber!,
+          p_skey: this.cookies['p_skey'] ?? '',
+          jsonhtml_callback: 'callback',
+          p_uin: this.qqNumber!,
+          picfile: imageBase64,
+        });
+        if (albumId) params.set('albumid', albumId);
 
-    // 方式 2: data/ret 切片
-    try {
-      const si = html.indexOf('"data"') + 7;
-      const ei = html.indexOf('"ret"') - 1;
-      if (si >= 7 && ei > si) {
-        const s = html.slice(si, ei).replace(/,\s*$/, '').trim();
-        return JSON.parse(s) as UploadImageResult;
+        const url = `https://up.qzone.qq.com/cgi-bin/upload/cgi_upload_image?g_tk=${this.getGtk()}`;
+        const resp = await this.post(url, { data: params });
+        if (resp.status >= 400) throw new Error(`图片上传 HTTP ${resp.status}`);
+        const html = resp.text;
+
+        try {
+          const parsed = parseJsonp(html, 'callback') as Record<string, unknown>;
+          if (parsed && typeof parsed === 'object') {
+            const dataObj = parsed['data'];
+            if (dataObj && typeof dataObj === 'object' && ('lloc' in dataObj || 'albumid' in dataObj)) {
+              return dataObj as UploadImageResult;
+            }
+            if ('lloc' in parsed || 'albumid' in parsed) return parsed as UploadImageResult;
+          }
+        } catch { /* fall through */ }
+
+        const jsonMatch = html.match(/\{[^{}]*"albumid"[^{}]*\}/s);
+        if (jsonMatch) {
+          try {
+            const c = JSON.parse(jsonMatch[0]) as UploadImageResult;
+            if (c.lloc || c.albumid) return c;
+          } catch { /* ignore */ }
+        }
+
+        try {
+          const si = html.indexOf('"data"') + 7;
+          const ei = html.indexOf('"ret"') - 1;
+          if (si >= 7 && ei > si) {
+            const s = html.slice(si, ei).replace(/,\s*$/, '').trim();
+            return JSON.parse(s) as UploadImageResult;
+          }
+        } catch { /* ignore */ }
+
+        throw new Error(`图片上传解析失败，响应内容: ${html.slice(0, 300)}`);
+      } catch (error) {
+        lastError = error;
+        if (attempt >= UPLOAD_IMAGE_RETRY_COUNT) break;
+        await new Promise(resolve => setTimeout(resolve, 400 * (attempt + 1)));
       }
-    } catch { /* ignore */ }
-
-    throw new Error(`图片上传解析失败，响应内容: ${html.slice(0, 300)}`);
+    }
+    throw lastError instanceof Error ? lastError : new Error(String(lastError));
   }
 
   // ──────────────────────────────────────────────
@@ -2060,13 +2106,18 @@ export class QzoneClient {
         format: 'fs', qzreferrer: this.getQzreferrer(),
       };
     } else {
+      const uploadLimit = pLimit(PUBLISH_IMAGE_UPLOAD_CONCURRENCY);
+      const uploaded = await Promise.all(images.map((image, index) => uploadLimit(async () => {
+        try {
+          const ret = await this.uploadImage(image);
+          return { index, ret };
+        } catch (exc) {
+          throw new Error(`第 ${index + 1}/${images.length} 张图片上传失败: ${exc}`);
+        }
+      })));
       const richval: string[] = [];
       const picBo: string[] = [];
-      for (let i = 0; i < images.length; i++) {
-        let ret: UploadImageResult;
-        try { ret = await this.uploadImage(images[i]!); }
-        catch (exc) { throw new Error(`第 ${i + 1}/${images.length} 张图片上传失败: ${exc}`); }
-
+      for (const { ret } of uploaded) {
         const albumid = ret.albumid ?? '';
         const lloc = ret.lloc ?? '';
         const sloc = ret.sloc ?? lloc;

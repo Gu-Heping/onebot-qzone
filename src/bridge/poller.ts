@@ -439,6 +439,10 @@ function buildHeartbeatEvent(selfId: string, status: Record<string, unknown>): O
 // EventPoller
 // ─────────────────────────────────────────────────────────
 export class EventPoller {
+  private static readonly COMMENT_FETCH_LIMIT_INITIAL = 50;
+  private static readonly COMMENT_FETCH_LIMIT_STEADY = 20;
+  private static readonly COMMENT_CACHE_MAX_AGE_SEC = 75;
+
   private running = false;
   private mainTimer: ReturnType<typeof setTimeout> | null = null;
   private commentTimer: ReturnType<typeof setTimeout> | null = null;
@@ -450,6 +454,7 @@ export class EventPoller {
   private seenCommentIds = new Map<string, Set<string>>();  // tid → commentIds
   private seenLikeUins = new Map<string, Set<string>>();    // tid → uins
   private pendingLikeUsers = new Map<string, Array<{ uin: string; nickname: string }>>(); // tid → 待匹配用户列表
+  private commentWarmTids = new Set<string>();
   private trackTids: Set<string> = new Set();
   private knownCounts = new Map<string, { comment: number; like: number }>();  // tid → counts from qz_opcnt2
   private lastError = 0;
@@ -735,11 +740,11 @@ export class EventPoller {
     for (const item of items) {
       if (!item.tid) continue;
       this.cacheNormalizedItem(item);
+      this.trackTids.add(item.tid);
       const isNew = !this.seenPostTids.has(item.tid);
       this.logEventDebug(`[Poller:DEBUG] item tid=${item.tid?.slice(0,16)}, isNew=${isNew}`);
       if (isNew) {
         this.markSeenTid(item.tid);
-        this.trackTids.add(item.tid);
         const event = await buildPostEvent(item, selfId, {
           client: this.client,
           attachImageData: this.config.attachImageDataInEvents,
@@ -789,10 +794,29 @@ export class EventPoller {
       likeCurkey: item.likeCurkey ?? '',
       abstime: item.createdTime,
     });
+    this.seedKnownCommentCount(item.tid, item.cmtnum);
+  }
+
+  private seedKnownCommentCount(tid: string, count: number): void {
+    const safeCount = Math.max(0, count || 0);
+    const existing = this.knownCounts.get(tid);
+    if (existing) {
+      existing.comment = Math.max(existing.comment, safeCount);
+      return;
+    }
+    this.knownCounts.set(tid, { comment: safeCount, like: 0 });
   }
 
   private async pollComments(selfUin: string, tid: string): Promise<void> {
-    const res = await this.client.getCommentsBestEffort(selfUin, tid, 50, 0);
+    const seenForTid = this.seenCommentIds.get(tid);
+    const isWarm = this.commentWarmTids.has(tid) || !!(seenForTid && seenForTid.size > 0);
+    const fetchLimit = isWarm
+      ? EventPoller.COMMENT_FETCH_LIMIT_STEADY
+      : EventPoller.COMMENT_FETCH_LIMIT_INITIAL;
+    const res = await this.client.getCommentsBestEffort(selfUin, tid, fetchLimit, 0, {
+      forceRefresh: !isWarm,
+      maxCacheAgeSec: EventPoller.COMMENT_CACHE_MAX_AGE_SEC,
+    });
     const rawComments: Record<string, unknown>[] = [];
 
     for (const key of ['commentlist', 'comment_list', 'data', 'comments']) {
@@ -802,6 +826,8 @@ export class EventPoller {
 
     this.logEventDebug(`[Poller:DEBUG] pollComments tid=${tid.slice(0,8)} got ${rawComments.length} comments`);
     if (rawComments.length > 0) {
+      this.commentWarmTids.add(tid);
+      this.seedKnownCommentCount(tid, rawComments.length);
       for (const raw of rawComments) {
         const comment = normalizeComment(raw);
         if (!comment.commentId) continue;
@@ -916,9 +942,11 @@ export class EventPoller {
     for (const tid of [...this.trackTids]) {
       if (!toKeep.has(tid)) {
         this.trackTids.delete(tid);
+        this.commentWarmTids.delete(tid);
         this.seenCommentIds.delete(tid);
         this.seenLikeUins.delete(tid);
         this.pendingLikeUsers.delete(tid);
+        this.knownCounts.delete(tid);
       }
     }
   }
