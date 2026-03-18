@@ -44,7 +44,7 @@ const cases: TestCase[] = [
     name: 'publish 单回调异常不阻断其他',
     fn: async () => {
       const hub = new EventHub();
-      let ok: boolean = false;
+      let ok = false;
       hub.subscribe(() => { throw new Error('boom'); });
       hub.subscribe(() => { ok = true; });
       await hub.publish({ type: 'err' });
@@ -68,9 +68,8 @@ const cases: TestCase[] = [
     fn: () => {
       const hub = new EventHub();
       hub.addSeedTid('a');
-      hub.addSeedTid('a'); // 重复
+      hub.addSeedTid('a');
       assert(hub.getSeedTids().length === 1, '重复不应增加');
-      // 加满 20 条
       for (let i = 0; i < 25; i++) hub.addSeedTid(`t_${i}`);
       const tids = hub.getSeedTids();
       assert(tids.length === 20, '最多 20 条');
@@ -93,7 +92,52 @@ const cases: TestCase[] = [
     fn: async () => {
       const hub = new EventHub();
       await hub.publish({ type: 'lonely' });
-      // 不抛异常即通过
+    },
+  },
+  {
+    name: '相同动态事件短期内只推送一次',
+    fn: async () => {
+      const hub = new EventHub();
+      let count = 0;
+      hub.subscribe(() => { count++; });
+      const event = {
+        post_type: 'message',
+        self_id: 10001,
+        message_id: 123,
+        _tid: '123',
+      } as any;
+      await hub.publish(event);
+      await hub.publish(event);
+      assert(count === 1, '重复动态事件应被去重');
+    },
+  },
+  {
+    name: '相同评论事件短期内只推送一次',
+    fn: async () => {
+      const hub = new EventHub();
+      let count = 0;
+      hub.subscribe(() => { count++; });
+      const event = {
+        post_type: 'notice',
+        notice_type: 'qzone_comment',
+        self_id: 10001,
+        post_tid: 'post_1',
+        comment_id: 'comment_1',
+      } as any;
+      await hub.publish(event);
+      await hub.publish(event);
+      assert(count === 1, '重复评论事件应被去重');
+    },
+  },
+  {
+    name: '不同动态事件不应被错误去重',
+    fn: async () => {
+      const hub = new EventHub();
+      let count = 0;
+      hub.subscribe(() => { count++; });
+      await hub.publish({ post_type: 'message', self_id: 10001, message_id: 1, _tid: '1' } as any);
+      await hub.publish({ post_type: 'message', self_id: 10001, message_id: 2, _tid: '2' } as any);
+      assert(count === 2, '不同事件应正常下发');
     },
   },
 ];
