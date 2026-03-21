@@ -1569,6 +1569,8 @@ export class QzoneClient {
       let remainingPages = cappedPages;
       if (cappedPages > 3) log('DEBUG', `feeds3 pagination: max_pages=${cappedPages}`);
       let currentText = text;
+      /** 末页 HTML：用于 hasMoreFeeds / next_cursor（与 getFriendFeeds 语义对齐） */
+      let lastListPageText = text;
       while (msglist.length < pos + num && remainingPages > 0) {
         const externparam = this.extractExternparam(currentText);
         if (!externparam) {
@@ -1584,6 +1586,7 @@ export class QzoneClient {
             ? await this.fetchFeeds3Html(this.qqNumber!, true, 0, 50, externparam, uin)
             : await this.fetchFeeds3Html(uin, true, usedScope, 50, externparam);
         allHtmlTexts.push(currentText);
+        lastListPageText = currentText;
         const page = dropEmotionNoise(this.parseFeeds3Items(currentText, uin, undefined, 50));
 
         // 跨页去重
@@ -1637,15 +1640,75 @@ export class QzoneClient {
         return tb - ta;
       });
 
+      const fullLen = msglist.length;
+      const pages_fetched = 1 + (cappedPages - remainingPages);
+      const hasMoreFeedsOnLastPage = !/hasMoreFeeds\s*:\s*false/.test(lastListPageText);
+      const next_cursor = hasMoreFeedsOnLastPage ? this.extractExternparam(lastListPageText) : '';
+      const truncated_by_max_pages =
+        remainingPages === 0 && Boolean(next_cursor) && hasMoreFeedsOnLastPage;
+
       if (pos > 0) msglist = msglist.slice(pos);
       if (msglist.length > num) msglist = msglist.slice(0, num);
+      const returnedLen = msglist.length;
+      const next_pos = pos + returnedLen;
+      const buffer_has_more = next_pos < fullLen;
+      const has_more = buffer_has_more || (Boolean(next_cursor) && hasMoreFeedsOnLastPage);
+
       for (const item of msglist) this.cachePostMetaFromRaw(item);
       const scopeLabel = useFilterFromStream ? 'scope=0+filter' : useUinlist ? 'scope=0+uinlist' : `scope=${usedScope}`;
       log('INFO', `feeds3 fallback (${scopeLabel}) 获取到 ${msglist.length} 条说说`);
-      return { code: 0, message: `ok (feeds3 fallback, ${scopeLabel})`, msglist, _source: 'feeds3' };
+      const _page_info = {
+        count: returnedLen,
+        source: 'feeds3',
+        strategy: scopeLabel,
+        host_uin: uin,
+        pos,
+        num,
+        max_pages: cappedPages,
+        pages_fetched,
+        full_fetched_len: fullLen,
+        truncated_by_max_pages,
+        pagination: 'offset' as const,
+        hint: '下一页请调用 get_emotion_list 并传 pos=next_pos（与 OpenClaw 工具 offset 同义）',
+      };
+      log(
+        'DEBUG',
+        `getEmotionListViaFeeds3: has_more=${has_more} next_pos=${next_pos} next_cursor_len=${next_cursor.length} truncated_by_max_pages=${truncated_by_max_pages}`,
+      );
+      return {
+        code: 0,
+        message: `ok (feeds3 fallback, ${scopeLabel})`,
+        msglist,
+        _source: 'feeds3',
+        has_more,
+        next_pos,
+        next_cursor,
+        _page_info,
+      };
     } catch (exc) {
       log('ERROR', `feeds3 fallback 失败: ${exc}`);
-      return { code: -10000, message: String(exc), msglist: [] };
+      return {
+        code: -10000,
+        message: String(exc),
+        msglist: [],
+        has_more: false,
+        next_pos: pos,
+        next_cursor: '',
+        _page_info: {
+          count: 0,
+          source: 'feeds3',
+          strategy: '',
+          host_uin: uin,
+          pos,
+          num,
+          max_pages: maxPages,
+          pages_fetched: 0,
+          full_fetched_len: 0,
+          truncated_by_max_pages: false,
+          pagination: 'offset' as const,
+          error: true,
+        },
+      };
     }
   }
 
