@@ -147,7 +147,8 @@ export function parseFeeds3Items(
   let fdm: RegExpExecArray | null;
   while ((fdm = feedDataPat.exec(processedText)) !== null) {
     const attrs = fdm[1]!;
-    const tid = dataAttr(attrs, 'tid');
+    let tid = dataAttr(attrs, 'tid');
+    if (!tid) tid = dataAttr(attrs, 'origtid');
     const dataUin = dataAttr(attrs, 'uin');
     const origTid = dataAttr(attrs, 'origtid');
     const origUin = dataAttr(attrs, 'origuin');
@@ -172,7 +173,8 @@ export function parseFeeds3Items(
       }
     }
 
-    if (filterUin && (!matchedBlock || matchedBlock.opuin !== filterUin)) continue;
+    // data-uin 已与 filterUin 对齐；id="feed_*" 首段常为空间内部映射 uin，不能与展示 QQ 强比对
+    if (filterUin && !matchedBlock) continue;
     if (filterAppid && matchedBlock && matchedBlock.appid !== filterAppid) continue;
 
     const blockTypeidForLog = matchedBlock?.typeid ?? '';
