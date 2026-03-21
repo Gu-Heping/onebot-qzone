@@ -767,7 +767,7 @@ export class EventPoller {
           maxPics: MAX_IMAGE_DATA_PER_EVENT,
         }, sk ? {
           stablePostKey: sk,
-          authorUin: item.uin,
+          authorUin: item.uin ?? selfId,
           cellid: String(r['cellid'] ?? ''),
         } : undefined);
         this.logEventDebug(`[Poller:DEBUG] publishing event type=${event.post_type}`);
