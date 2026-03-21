@@ -419,8 +419,9 @@ export class ActionHandler {
     if (!uin) uin = this.client.qqNumber!;
     const num = safeInt(p['num'] ?? 20);
     const pos = safeInt(p['pos'] ?? 0);
+    const fastMode = !['0', 'false', 'no'].includes(String(p['fast_mode'] ?? '1').toLowerCase());
     log('INFO', `get_comment_list: tidRaw=${tidRaw} -> tid=${tid} uin=${uin}`);
-    const res = await this.client.getCommentsBestEffort(uin, tid, num, pos);
+    const res = await this.client.getCommentsBestEffort(uin, tid, num, pos, { fastMode });
     const cnt = [res['commentlist'], res['comment_list'], res['comments'], res['data']].find(Array.isArray) as unknown[] | undefined;
     log('INFO', `get_comment_list: code=${(res as Record<string, unknown>)['code']} comments=${cnt?.length ?? 0}`);
     return ok(res, echo);
@@ -650,7 +651,8 @@ export class ActionHandler {
     // #endregion
     const cursor = typeof p['cursor'] === 'string' ? p['cursor'] : '';
     const num = Math.max(1, Math.min(200, safeInt(p['num'] ?? p['count'] ?? 50)));
-    const res = await this.client.getFriendFeeds(cursor, num);
+    const fastMode = !['0', 'false', 'no'].includes(String(p['fast_mode'] ?? '1').toLowerCase());
+    const res = await this.client.getFriendFeeds(cursor, num, { fastMode });
     if (includeImageData && res && typeof res === 'object') {
       await this.enrichMsglistWithImageData(res as Record<string, unknown>, MAX_IMAGE_DATA_PER_POST, MAX_IMAGE_DATA_PER_RESPONSE);
     }

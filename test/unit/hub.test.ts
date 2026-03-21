@@ -112,6 +112,25 @@ const cases: TestCase[] = [
     },
   },
   {
+    name: '同 _stable_post_key 不同 _tid 仍去重',
+    fn: async () => {
+      const hub = new EventHub();
+      let count = 0;
+      hub.subscribe(() => { count++; });
+      const a = {
+        post_type: 'message',
+        self_id: 10001,
+        message_id: 1,
+        _tid: 'aaa',
+        _stable_post_key: '777:aaa',
+      } as any;
+      const b = { ...a, _tid: 'bbb', message_id: 2 };
+      await hub.publish(a);
+      await hub.publish(b);
+      assert(count === 1, 'stable key 相同应去重');
+    },
+  },
+  {
     name: '相同评论事件短期内只推送一次',
     fn: async () => {
       const hub = new EventHub();
