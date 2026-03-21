@@ -251,7 +251,7 @@ async function run(): Promise<void> {
 
   console.log('\n========== 说说/评论 解析多样性报告 ==========');
   console.log(JSON.stringify(report.totals, null, 2));
-  console.log('\n--- byAppid (count, emptyTextual, imgOnly, fwdShell, hasPic, musicMeta, shareTitle) ---');
+  console.log('\n--- byAppid ---');
   for (const [aid, s] of [...byAppid.entries()].sort((a, b) => b[1].count - a[1].count)) {
     console.log(
       `  appid=${aid}  n=${s.count}  noLineTxt=${s.emptyTextual}  +pic=${s.noLineTextButPic}  +fwd=${s.noLineTextButForward}  pic=${s.hasPic}  video=${s.hasVideo}  fwd=${s.hasForward}  musicMeta=${s.hasMusicShare}  shareTitle=${s.hasAppShareTitle}  cmtnum>0=${s.cmtnumPositive}`,
