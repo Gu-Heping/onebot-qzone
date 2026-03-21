@@ -1493,6 +1493,11 @@ export class QzoneClient {
 
   private async getEmotionListViaFeeds3(uin: string, num = 50, pos = 0, maxPages = 15): Promise<ApiResponse> {
     try {
+      /** 与 getFriendFeeds 一致：个人流里常混入 appid=217「点赞记录」等，非用户发的说说 */
+      const excludedEmotionAppids = new Set(['217']);
+      const dropEmotionNoise = (items: Record<string, unknown>[]): Record<string, unknown>[] =>
+        items.filter((m) => !excludedEmotionAppids.has(String(m['appid'] ?? '')));
+
       const isOwn = uin === this.qqNumber;
       let text = '';
       let msglist: Record<string, unknown>[];
@@ -1510,7 +1515,7 @@ export class QzoneClient {
         text = await this.fetchFeeds3Html(this.qqNumber!, false, 0, 20, '', undefined, 'all', 'all');
         const friends = this.extractFriendsFromFeeds3FromText(text);
         if (friends.length) this.mergeFriendCache(friends);
-        msglist = this.parseFeeds3Items(text, uin, undefined, pos + num, false);
+        msglist = dropEmotionNoise(this.parseFeeds3Items(text, uin, undefined, pos + num, false));
         if (msglist.length > 0) {
           usedScope = 0;
           useFilterFromStream = true;
@@ -1520,11 +1525,14 @@ export class QzoneClient {
       }
 
       if (msglist.length === 0) {
-        // 策略 1：scope=1（个人说说模式）；自己时可靠，好友时后端常返回空
+        // 策略 1：scope=1（个人说说模式）；好友时后端常返回空。过滤 217 后若为空则继续走后续策略
         log('DEBUG', `feeds3 fallback: trying scope=1 for uin=${uin}`);
         text = await this.fetchFeeds3Html(uin, true, 1, 50);
-        msglist = this.parseFeeds3Items(text, uin, undefined, pos + num);
-        usedScope = 1;
+        const scope1 = dropEmotionNoise(this.parseFeeds3Items(text, uin, undefined, pos + num));
+        if (scope1.length > 0) {
+          msglist = scope1;
+          usedScope = 1;
+        }
       }
 
       if (msglist.length === 0 && !isOwn) {
@@ -1533,7 +1541,7 @@ export class QzoneClient {
         text = await this.fetchFeeds3Html(this.qqNumber!, true, 0, 50, '', uin);
         const friends = this.extractFriendsFromFeeds3FromText(text);
         if (friends.length) this.mergeFriendCache(friends);
-        msglist = this.parseFeeds3Items(text, uin, undefined, pos + num);
+        msglist = dropEmotionNoise(this.parseFeeds3Items(text, uin, undefined, pos + num));
         if (msglist.length > 0) {
           usedScope = 0;
           useUinlist = true;
@@ -1546,7 +1554,7 @@ export class QzoneClient {
         text = await this.fetchFeeds3Html(uin, true, 0, 50);
         const friends = this.extractFriendsFromFeeds3FromText(text);
         if (friends.length) this.mergeFriendCache(friends);
-        msglist = this.parseFeeds3Items(text, uin, undefined, pos + num);
+        msglist = dropEmotionNoise(this.parseFeeds3Items(text, uin, undefined, pos + num));
         usedScope = 0;
       }
 
@@ -1576,8 +1584,8 @@ export class QzoneClient {
             ? await this.fetchFeeds3Html(this.qqNumber!, true, 0, 50, externparam, uin)
             : await this.fetchFeeds3Html(uin, true, usedScope, 50, externparam);
         allHtmlTexts.push(currentText);
-        const page = this.parseFeeds3Items(currentText, uin, undefined, 50);
-        
+        const page = dropEmotionNoise(this.parseFeeds3Items(currentText, uin, undefined, 50));
+
         // 跨页去重
         let added = 0;
         for (const item of page) {
@@ -1991,10 +1999,11 @@ export class QzoneClient {
         commentHttpFetches = 1;
         let comments = _parseFeeds3Comments(htmlText);
 
-        if (!fastMode && !comments.has(tid)) {
+        // 好友动态：scope=1 常不含其 tid；本人 fast 路径下若未命中则多为「该帖无评论」而非缺页，避免无谓二次请求
+        if (!comments.has(tid) && (!fastMode || uin !== this.qqNumber)) {
           log('DEBUG', `getCommentsBestEffort: scope=1 未找到 tid=${tid}，尝试 scope=0 好友动态流`);
           const htmlText2 = await this.fetchFeeds3Html(this.qqNumber!, false, 0, 50, '', undefined, 'all', 'all');
-          commentHttpFetches = 2;
+          commentHttpFetches += 1;
           const comments2 = _parseFeeds3Comments(htmlText2);
           for (const [postTid, cmts] of comments2) {
             if (!comments.has(postTid)) {

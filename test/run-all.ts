@@ -41,6 +41,7 @@ async function runUnitSuites(): Promise<SuiteResult[]> {
     (await import('./unit/robustness.test.ts')).run,
     (await import('./unit/feeds3-comments.test.ts')).run,
     (await import('./unit/feeds3-enhanced.test.ts')).run,
+    (await import('./unit/feeds3-items-parse.test.ts')).run,
   ];
   const results: SuiteResult[] = [];
   for (const run of suites) {
