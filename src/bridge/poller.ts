@@ -1,6 +1,12 @@
 import { QzoneClient } from '../qzone/client.js';
 import type { BridgeConfig } from './config.js';
 import { EventHub } from './hub.js';
+import {
+  authorUinFromRaw,
+  buildStablePostKey,
+  collectSeenLookupKeys,
+  stableTidFromRaw,
+} from './stablePostKey.js';
 import { safeInt } from './utils.js';
 import { htmlUnescape } from '../qzone/utils.js';
 import { processEmojis, parseEmojis, type EmojiConvertOptions } from '../qzone/emoji.js';
@@ -166,7 +172,7 @@ function processContent(content: string): string {
 
 export function normalizeEmotion(raw: Record<string, unknown>, selfUin: string): NormalizedItem {
   const tid = String(raw['tid'] ?? raw['cellid'] ?? '');
-  const uin = String(raw['uin'] ?? raw['frienduin'] ?? selfUin);
+  const uin = String(raw['opuin'] ?? raw['uin'] ?? raw['frienduin'] ?? selfUin);
   const nickname = stripHtml(String(raw['nickname'] ?? raw['name'] ?? ''));
 
   // 内容提取：有 conlist 时优先从 conlist 重建（保证表情并入正文、不丢字），否则用 content/con
@@ -314,6 +320,7 @@ async function buildPostEvent(
   item: NormalizedItem,
   selfId: string,
   opts?: { client: QzoneClient; attachImageData: boolean; maxPics: number },
+  meta?: { stablePostKey?: string; authorUin?: string; cellid?: string },
 ): Promise<OneBotEvent> {
   const segments: Record<string, unknown>[] = [];
 
@@ -356,7 +363,7 @@ async function buildPostEvent(
     for (const url of item.videos) segments.push({ type: 'video', data: { url } });
   }
 
-  return {
+  const ev: OneBotEvent = {
     time: item.createdTime || now(),
     self_id: safeInt(selfId),
     post_type: 'message',
@@ -387,6 +394,11 @@ async function buildPostEvent(
     _like_unikey: item.likeUnikey ?? '',
     _like_curkey: item.likeCurkey ?? '',
   };
+  const rec = ev as Record<string, unknown>;
+  if (meta?.stablePostKey) rec['_stable_post_key'] = meta.stablePostKey;
+  if (meta?.authorUin) rec['_author_uin'] = meta.authorUin;
+  if (meta?.cellid) rec['_cellid'] = meta.cellid;
+  return ev;
 }
 
 function buildCommentEvent(comment: QzoneComment, postUin: string, postTid: string, selfId: string): OneBotEvent {
@@ -460,8 +472,6 @@ export class EventPoller {
   private lastError = 0;
   private backoff = 0;
   private statusOk = false;
-  private seenTidsDirty = false;
-  private seenTidsSaveTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(
     private readonly client: QzoneClient,
@@ -492,19 +502,27 @@ export class EventPoller {
       const arr = [...this.seenPostTids].slice(-2000);
       writeFileSync(this.seenTidsFile, JSON.stringify(arr), 'utf-8');
     } catch { /* 忽略写入错误 */ }
-    this.seenTidsDirty = false;
   }
 
-  private markSeenTid(tid: string): void {
-    this.seenPostTids.add(tid);
-    this.seenTidsDirty = true;
-    // 防抖：5 秒后批量写入
-    if (!this.seenTidsSaveTimer) {
-      this.seenTidsSaveTimer = setTimeout(() => {
-        this.seenTidsSaveTimer = null;
-        if (this.seenTidsDirty) this.saveSeenTids();
-      }, 5000);
+  /** 合并 canonical + 历史兼容键，供 seen 查询与持久化 */
+  private markSeenPostRaw(raw: Record<string, unknown>): void {
+    const author = authorUinFromRaw(raw);
+    const tid = stableTidFromRaw(raw);
+    const cellid = String(raw['cellid'] ?? '').trim() || undefined;
+    for (const k of collectSeenLookupKeys(author, tid, cellid)) {
+      this.seenPostTids.add(k);
     }
+  }
+
+  private flushSeenTidsImmediate(): void {
+    this.saveSeenTids();
+  }
+
+  private isPostSeenRaw(raw: Record<string, unknown>): boolean {
+    const author = authorUinFromRaw(raw);
+    const tid = stableTidFromRaw(raw);
+    const cellid = String(raw['cellid'] ?? '').trim() || undefined;
+    return collectSeenLookupKeys(author, tid, cellid).some((k) => this.seenPostTids.has(k));
   }
 
   start(): void {
@@ -729,30 +747,42 @@ export class EventPoller {
 
     if (!this.config.emitMessageEvents) return;
 
-    let items: NormalizedItem[] = [];
+    const items: NormalizedItem[] = [];
+    let rawList: Record<string, unknown>[] = [];
     try {
       const res = await this.client.getEmotionList(selfId, 0, 20);
-      const raw = Array.isArray(res['msglist']) ? (res['msglist'] as Record<string, unknown>[]) : [];
-      items = raw.map(r => normalizeEmotion(r, selfId));
+      rawList = Array.isArray(res['msglist']) ? (res['msglist'] as Record<string, unknown>[]) : [];
+      for (const r of rawList) items.push(normalizeEmotion(r, selfId));
     } catch { /* skip */ }
 
     this.logEventDebug(`[Poller:DEBUG] pollMyPosts got ${items.length} items, seenTids=${this.seenPostTids.size}, trackTids=${this.trackTids.size}`);
-    for (const item of items) {
-      if (!item.tid) continue;
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i]!;
+      const r = rawList[i];
+      if (!item.tid || !r) continue;
       this.cacheNormalizedItem(item);
       this.trackTids.add(item.tid);
-      const isNew = !this.seenPostTids.has(item.tid);
+      const isNew = !this.isPostSeenRaw(r);
       this.logEventDebug(`[Poller:DEBUG] item tid=${item.tid?.slice(0,16)}, isNew=${isNew}`);
       if (isNew) {
-        this.markSeenTid(item.tid);
+        const sk = buildStablePostKey(r);
         const event = await buildPostEvent(item, selfId, {
           client: this.client,
           attachImageData: this.config.attachImageDataInEvents,
           maxPics: MAX_IMAGE_DATA_PER_EVENT,
-        });
+        }, sk ? {
+          stablePostKey: sk,
+          authorUin: authorUinFromRaw(r),
+          cellid: String(r['cellid'] ?? ''),
+        } : undefined);
         this.logEventDebug(`[Poller:DEBUG] publishing event type=${event.post_type}`);
         await this.hub.publish(event);
+        this.markSeenPostRaw(r);
+        this.flushSeenTidsImmediate();
         this.logEventDebug(`[Poller:DEBUG] publish done, subscribers=${this.hub.subscriberCount()}`);
+        if (this.config.eventDebug) {
+          console.log(`[push][seen] myPosts keys=${collectSeenLookupKeys(authorUinFromRaw(r), stableTidFromRaw(r), String(r['cellid'] ?? '').trim() || undefined).join(',')}`);
+        }
       }
     }
 
@@ -766,19 +796,26 @@ export class EventPoller {
       const res = await this.client.getFriendFeeds('', 20);
       const raw = Array.isArray(res['msglist']) ? (res['msglist'] as Record<string, unknown>[]) : [];
       for (const r of raw) {
-        const item = normalizeEmotion(r, String(r['uin'] ?? ''));
+        const item = normalizeEmotion(r, selfId);
         if (!item.tid || !item.uin) continue;
         this.cacheNormalizedItem(item);
-        const key = `${item.uin}_${item.tid}`;
-        if (!this.seenPostTids.has(key)) {
-          this.markSeenTid(key);
-          const event = await buildPostEvent(item, selfId, {
-            client: this.client,
-            attachImageData: this.config.attachImageDataInEvents,
-            maxPics: MAX_IMAGE_DATA_PER_EVENT,
-          });
-          (event as Record<string, unknown>)['_from_friend'] = true;
-          await this.hub.publish(event);
+        if (this.isPostSeenRaw(r)) continue;
+        const sk = buildStablePostKey(r);
+        const event = await buildPostEvent(item, selfId, {
+          client: this.client,
+          attachImageData: this.config.attachImageDataInEvents,
+          maxPics: MAX_IMAGE_DATA_PER_EVENT,
+        }, sk ? {
+          stablePostKey: sk,
+          authorUin: authorUinFromRaw(r),
+          cellid: String(r['cellid'] ?? ''),
+        } : undefined);
+        (event as Record<string, unknown>)['_from_friend'] = true;
+        await this.hub.publish(event);
+        this.markSeenPostRaw(r);
+        this.flushSeenTidsImmediate();
+        if (this.config.eventDebug) {
+          console.log(`[push][seen] friendFeeds keys=${collectSeenLookupKeys(authorUinFromRaw(r), stableTidFromRaw(r), String(r['cellid'] ?? '').trim() || undefined).join(',')}`);
         }
       }
     } catch { /* skip */ }

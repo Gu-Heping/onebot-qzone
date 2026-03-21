@@ -1647,28 +1647,80 @@ export class QzoneClient {
   }
 
   /**
-   * 获取好友说说动态（scope=0 filter=all，仅展示原创说说）。
-   * 使用完整的浏览器参数（outputhtmlfeed=1, pagenum, begintime, dayspac 等）使翻页正常工作。
-   * cursor 为上次返回的 externparam 字符串；首页不传。
-   * 通过 main.hasMoreFeeds 判断是否还有下一页。
+   * 获取好友说说动态（scope=0 filter=all）。
+   * - `fastMode=true`（HTTP 默认由 actions 开启）：**单次** fetchFeeds3Html + 单页解析 + 本地筛好友，快速返回。
+   * - `fastMode=false`（poller 默认）：保留多轮翻页直至凑满 num（后台完整性）。
    */
-  async getFriendFeeds(cursor = '', num = 50): Promise<ApiResponse> {
+  async getFriendFeeds(cursor = '', num = 50, opts?: { fastMode?: boolean }): Promise<ApiResponse> {
     this.requireLogin();
+    const fastMode = opts?.fastMode === true;
     // #region agent log
     const loginUin = this.qqNumber ?? '';
     try {
-      const payload = { location: 'client.ts:getFriendFeeds', message: 'request params', data: { scope: 0, requestUinMasked: loginUin ? `${loginUin.slice(0, -2)}**` : '', cursorLen: cursor.length }, timestamp: Date.now(), hypothesisId: 'H5' as const };
+      const payload = { location: 'client.ts:getFriendFeeds', message: 'request params', data: { scope: 0, requestUinMasked: loginUin ? `${loginUin.slice(0, -2)}**` : '', cursorLen: cursor.length, fastMode }, timestamp: Date.now(), hypothesisId: 'H5' as const };
       fs.appendFileSync(path.join(this.config.cachePath, 'debug.log'), JSON.stringify(payload) + '\n');
     } catch (_) {}
     // #endregion
     const EXCLUDED_APPIDS = new Set(['217']);
     const want = Math.max(1, Math.min(200, num));
+    const selfUin = String(this.qqNumber ?? '');
     const seenTids = new Set<string>();
     const merged: Record<string, unknown>[] = [];
     let nextCursor = cursor;
     const maxRounds = 20;
 
+    const ingestFriendOnlyItem = (item: Record<string, unknown>): boolean => {
+      if (EXCLUDED_APPIDS.has(String(item['appid'] ?? ''))) return false;
+      const tid = String(item['tid'] ?? item['cellid'] ?? '').trim();
+      const author = String(item['opuin'] ?? item['uin'] ?? '').trim();
+      if (!tid || !author || author === selfUin) return false;
+      if (seenTids.has(tid)) return false;
+      seenTids.add(tid);
+      merged.push(item);
+      this.cachePostMetaFromRaw(item);
+      return true;
+    };
+
+    const ingestSlowItem = (item: Record<string, unknown>): void => {
+      if (EXCLUDED_APPIDS.has(String(item['appid'] ?? ''))) return;
+      const tid = String(item['tid'] ?? item['cellid'] ?? '');
+      if (tid && seenTids.has(tid)) return;
+      if (tid) seenTids.add(tid);
+      merged.push(item);
+      this.cachePostMetaFromRaw(item);
+    };
+
     try {
+      if (fastMode) {
+        const text = await this.fetchFeeds3Html(
+          this.qqNumber!, true, 0, 20, cursor,
+          undefined, 'all', 'all',
+        );
+        const friends = this.extractFriendsFromFeeds3FromText(text);
+        if (friends.length) this.mergeFriendCache(friends);
+        const hasMoreFeeds = !/hasMoreFeeds\s*:\s*false/.test(text);
+        const pageCursor = hasMoreFeeds ? _extractExternparam(text) : '';
+        const parseCap = Math.min(200, Math.max(80, want * 4));
+        const all = this.parseFeeds3Items(text, undefined, undefined, parseCap, false);
+        for (const item of all) ingestFriendOnlyItem(item);
+        const msglist = merged.slice(0, want);
+        const has_more = Boolean(pageCursor && hasMoreFeeds);
+        log('DEBUG', `[feeds3][fast] mode=fast fetch_count=1 items=${msglist.length}`);
+        log(
+          'DEBUG',
+          `[feeds3][fast] has_more=${has_more} next_cursor=${pageCursor ? `${pageCursor.slice(0, 120)}${pageCursor.length > 120 ? '…' : ''}` : '(empty)'}`,
+        );
+        log('DEBUG', `getFriendFeeds: fast scope=0 friend-only ${msglist.length} posts, next_cursor=${pageCursor || '(end)'}`);
+        return {
+          code: 0,
+          message: 'ok',
+          msglist,
+          next_cursor: pageCursor,
+          has_more,
+          _page_info: { count: msglist.length, source: 'feeds3', fast_mode: true },
+        };
+      }
+
       for (let round = 0; round < maxRounds && merged.length < want; round++) {
         const text = await this.fetchFeeds3Html(
           this.qqNumber!, true, 0, 20, nextCursor,
@@ -1687,20 +1739,14 @@ export class QzoneClient {
         nextCursor = pageCursor;
 
         const all = this.parseFeeds3Items(text, undefined, undefined, want - merged.length, false);
-        for (const item of all) {
-          if (EXCLUDED_APPIDS.has(String(item['appid'] ?? ''))) continue;
-          const tid = String(item['tid'] ?? item['cellid'] ?? '');
-          if (tid && seenTids.has(tid)) continue;
-          if (tid) seenTids.add(tid);
-          merged.push(item);
-          this.cachePostMetaFromRaw(item);
-        }
+        for (const item of all) ingestSlowItem(item);
         log('DEBUG', `getFriendFeeds: round ${round + 1} got ${all.length} raw → ${merged.length} merged, hasMore=${hasMore}`);
 
         if (!hasMore || merged.length >= want) break;
       }
 
       const msglist = merged.slice(0, want);
+      const has_more = Boolean(nextCursor);
       // #region agent log
       const authors = msglist.slice(0, 5).map((m) => ({ uin: m['uin'], opuin: m['opuin'], tid: m['tid'] }));
       const isSelf = loginUin && authors.some((a) => String(a.uin ?? a.opuin ?? '') === loginUin);
@@ -1709,10 +1755,24 @@ export class QzoneClient {
       } catch (_) {}
       // #endregion
       log('DEBUG', `getFriendFeeds: scope=0 total ${msglist.length} posts (excl. activity), next_cursor=${nextCursor || '(end)'}`);
-      return { code: 0, message: 'ok', msglist, next_cursor: nextCursor };
+      return {
+        code: 0,
+        message: 'ok',
+        msglist,
+        next_cursor: nextCursor,
+        has_more,
+        _page_info: { count: msglist.length, source: 'feeds3', fast_mode: false },
+      };
     } catch (exc) {
       log('ERROR', `friend feeds 获取失败: ${exc}`);
-      return { code: -1, message: String(exc), msglist: [] };
+      return {
+        code: -1,
+        message: String(exc),
+        msglist: [],
+        next_cursor: '',
+        has_more: false,
+        _page_info: { count: 0, source: 'feeds3', fast_mode: fastMode },
+      };
     }
   }
 
@@ -1868,14 +1928,38 @@ export class QzoneClient {
     tid: string,
     num = 20,
     pos = 0,
-    options?: { forceRefresh?: boolean; maxCacheAgeSec?: number },
+    options?: { forceRefresh?: boolean; maxCacheAgeSec?: number; fastMode?: boolean },
   ): Promise<ApiResponse> {
-    log('DEBUG', `getCommentsBestEffort: uin=${uin} tid=${tid} num=${num} pos=${pos}`);
+    const fastMode = options?.fastMode === true;
+    log('DEBUG', `getCommentsBestEffort: uin=${uin} tid=${tid} num=${num} pos=${pos} fastMode=${fastMode}`);
 
     const forceRefresh = options?.forceRefresh ?? false;
     const maxCacheAgeSec = options?.maxCacheAgeSec ?? 90;
     let feeds3List = this.feeds3Comments.get(tid);
     const cacheAgeSec = this.commentCacheAgeSeconds(tid);
+
+    const wrapCommentPage = (
+      base: ApiResponse,
+      sliceLen: number,
+      total: number,
+      source: string,
+      fastLogFetches?: number,
+    ): ApiResponse => {
+      const has_more = pos + sliceLen < total;
+      const nc = has_more ? String(pos + sliceLen) : '';
+      if (fastMode && fastLogFetches !== undefined) {
+        log('DEBUG', `[feeds3][fast] mode=fast fetch_count=${fastLogFetches} items=${sliceLen}`);
+        log('DEBUG', `[feeds3][fast] has_more=${has_more} next_cursor=${nc || '(empty)'}`);
+      }
+      return {
+        ...base,
+        has_more,
+        next_cursor: nc,
+        _page_info: { count: sliceLen, source, fast_mode: fastMode },
+      };
+    };
+
+    let commentHttpFetches = 0;
 
     if (
       feeds3List
@@ -1885,37 +1969,40 @@ export class QzoneClient {
       && cacheAgeSec <= maxCacheAgeSec
     ) {
       const slice = feeds3List.slice(pos, pos + num);
-      return {
-        code: 0,
-        commentlist: slice,
-        _source: 'feeds3_cache',
-        _feeds3_total: feeds3List.length,
-      };
+      return wrapCommentPage(
+        {
+          code: 0,
+          commentlist: slice,
+          _source: 'feeds3_cache',
+          _feeds3_total: feeds3List.length,
+        },
+        slice.length,
+        feeds3List.length,
+        'feeds3_cache',
+        fastMode ? 0 : undefined,
+      );
     }
-    
+
     // 如果缓存中没有该 tid 的评论，主动拉取 feeds3 HTML 来解析
     if (!feeds3List || feeds3List.length === 0) {
       log('INFO', `getCommentsBestEffort: feeds3Comments 缓存未命中，主动拉取 uin=${uin} tid=${tid}`);
       try {
-        // 尝试多种 scope 策略拉取 feeds3，提高命中率
-        // 策略1: scope=1 个人说说模式
-        let htmlText = await this.fetchFeeds3Html(uin, true, 1, 50);
+        const htmlText = await this.fetchFeeds3Html(uin, true, 1, 50);
+        commentHttpFetches = 1;
         let comments = _parseFeeds3Comments(htmlText);
-        
-        // 如果没找到目标 tid 的评论，尝试策略2: scope=0 好友动态流
-        if (!comments.has(tid)) {
+
+        if (!fastMode && !comments.has(tid)) {
           log('DEBUG', `getCommentsBestEffort: scope=1 未找到 tid=${tid}，尝试 scope=0 好友动态流`);
           const htmlText2 = await this.fetchFeeds3Html(this.qqNumber!, false, 0, 50, '', undefined, 'all', 'all');
+          commentHttpFetches = 2;
           const comments2 = _parseFeeds3Comments(htmlText2);
-          // 合并结果
           for (const [postTid, cmts] of comments2) {
             if (!comments.has(postTid)) {
               comments.set(postTid, cmts);
             }
           }
         }
-        
-        // 合并到缓存
+
         this.mergeFeeds3Comments(comments);
         feeds3List = this.feeds3Comments.get(tid);
         log('DEBUG', `getCommentsBestEffort: 主动拉取后 feeds3 解析到 ${feeds3List?.length ?? 0} 条评论`);
@@ -1923,20 +2010,38 @@ export class QzoneClient {
         log('WARNING', `getCommentsBestEffort: 主动拉取 feeds3 失败: ${e}`);
       }
     }
-    
+
     if (feeds3List && feeds3List.length > 0) {
       const slice = feeds3List.slice(pos, pos + num);
       log('INFO', `getCommentsBestEffort: 使用 feeds3 评论数=${slice.length}/${feeds3List.length}`);
-      return {
-        code: 0,
-        commentlist: slice,
-        _source: 'feeds3',
-        _feeds3_total: feeds3List.length,
-      };
+      return wrapCommentPage(
+        {
+          code: 0,
+          commentlist: slice,
+          _source: 'feeds3',
+          _feeds3_total: feeds3List.length,
+        },
+        slice.length,
+        feeds3List.length,
+        'feeds3',
+        fastMode ? commentHttpFetches : undefined,
+      );
     }
 
     log('WARNING', `getCommentsBestEffort: 未获取到评论`);
-    return { code: -1, message: 'all comment methods failed' };
+    const empty = {
+      code: -1,
+      message: 'all comment methods failed',
+      commentlist: [] as unknown[],
+      has_more: false,
+      next_cursor: '',
+      _page_info: { count: 0, source: 'feeds3', fast_mode: fastMode },
+    };
+    if (fastMode) {
+      log('DEBUG', `[feeds3][fast] mode=fast fetch_count=${commentHttpFetches} items=0`);
+      log('DEBUG', `[feeds3][fast] has_more=false next_cursor=(empty)`);
+    }
+    return empty;
   }
 
   // ──────────────────────────────────────────────

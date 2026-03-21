@@ -6,11 +6,24 @@ const MAX_SEED_TIDS = 20;
 const EVENT_DEDUP_TTL_MS = 60_000;
 const EVENT_DEDUP_MAX = 1000;
 
+export type EventHubOptions = { eventDebug?: boolean };
+
 function getEventFingerprint(event: OneBotEvent): string | null {
   const record = event as Record<string, unknown>;
   const postType = String(record['post_type'] ?? '');
 
   if (postType === 'message') {
+    const stable = String(record['_stable_post_key'] ?? '').trim();
+    if (stable) {
+      const colon = stable.indexOf(':');
+      if (colon > 0) {
+        const authorUin = stable.slice(0, colon);
+        const stableTid = stable.slice(colon + 1);
+        if (stableTid) {
+          return `message:${record['self_id'] ?? ''}:${authorUin}:${stableTid}`;
+        }
+      }
+    }
     const tid = String(record['_tid'] ?? record['message_id'] ?? '');
     if (!tid) return null;
     return `message:${record['self_id'] ?? ''}:${tid}`;
@@ -40,6 +53,11 @@ export class EventHub {
   private subscribers = new Set<EventCallback>();
   private seedTids: string[] = [];
   private recentEventFingerprints = new Map<string, number>();
+  private readonly eventDebug: boolean;
+
+  constructor(opts?: EventHubOptions) {
+    this.eventDebug = Boolean(opts?.eventDebug);
+  }
 
   subscribe(cb: EventCallback): void {
     this.subscribers.add(cb);
@@ -49,8 +67,14 @@ export class EventHub {
     this.subscribers.delete(cb);
   }
 
-  async publish(event: OneBotEvent): Promise<void> {
-    if (this.isDuplicateEvent(event)) return;
+  /** @returns 是否实际下发（false 表示短期内重复已去重） */
+  async publish(event: OneBotEvent): Promise<boolean> {
+    const fp = getEventFingerprint(event);
+    if (this.isDuplicateEvent(event)) {
+      if (this.eventDebug && fp) console.log(`[push][dedupe] ${fp}`);
+      return false;
+    }
+    if (this.eventDebug && fp) console.log(`[push][publish] ${fp}`);
     for (const cb of this.subscribers) {
       try {
         await cb(event);
@@ -58,6 +82,7 @@ export class EventHub {
         console.error('[EventHub] callback error:', err);
       }
     }
+    return true;
   }
 
   addSeedTid(tid: string): void {

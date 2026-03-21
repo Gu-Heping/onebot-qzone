@@ -171,7 +171,7 @@ async function main(): Promise<void> {
   }
 
   // Build components
-  const hub     = new EventHub();
+  const hub     = new EventHub({ eventDebug: config.eventDebug });
   const poller  = new EventPoller(client, hub, config);
   const handler = new ActionHandler(client, hub, poller, config);
   const app     = createApp(config, handler, hub, client);
