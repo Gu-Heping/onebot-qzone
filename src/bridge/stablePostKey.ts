@@ -19,7 +19,7 @@ export function buildStablePostKey(raw: Record<string, unknown>): string {
 }
 
 /** 与 normalizeEmotion 输出一致，避免 raw 缺字段时 stable key 为空、Hub 退化成易变的 legacy 指纹 */
-export function buildStablePostKeyFromItem(item: { uin: string; tid: string }): string {
+export function buildStablePostKeyFromItem(item: { uin: string | null | undefined; tid: string | null | undefined }): string {
   const u = String(item.uin ?? '').trim();
   const t = String(item.tid ?? '').trim();
   if (!u || !t) return '';
@@ -31,18 +31,20 @@ export function buildStablePostKeyFromItem(item: { uin: string; tid: string }): 
  * 漏合并会导致 seen 与 Hub `_stable_post_key` 不一致 → 重复推送。
  */
 export function seenLookupKeysForPost(
-  item: { uin: string; tid: string },
+  item: { uin: string | null | undefined; tid: string | null | undefined },
   raw: Record<string, unknown>,
 ): string[] {
   const cellid = String(raw['cellid'] ?? '').trim() || undefined;
+  const iu = String(item.uin ?? '').trim();
+  const it = String(item.tid ?? '').trim();
   const merged = new Set<string>();
-  for (const k of collectSeenLookupKeys(String(item.uin).trim(), String(item.tid).trim(), cellid)) {
+  for (const k of collectSeenLookupKeys(iu, it, cellid)) {
     merged.add(k);
   }
   const ra = authorUinFromRaw(raw);
   const rt = stableTidFromRaw(raw);
   if (ra || rt) {
-    for (const k of collectSeenLookupKeys(ra || String(item.uin).trim(), rt || String(item.tid).trim(), cellid)) {
+    for (const k of collectSeenLookupKeys(ra || iu, rt || it, cellid)) {
       merged.add(k);
     }
   }
