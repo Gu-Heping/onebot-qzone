@@ -3,7 +3,8 @@ import type { OneBotEvent } from '../qzone/types.js';
 export type EventCallback = (event: OneBotEvent) => void | Promise<void>;
 
 const MAX_SEED_TIDS = 20;
-const EVENT_DEDUP_TTL_MS = 60_000;
+/** 轮询多路（说说+好友流）可能在 60s 内用不同指纹重复到达；过短会误判「去重失败」实为 TTL 过期 */
+const EVENT_DEDUP_TTL_MS = 300_000;
 const EVENT_DEDUP_MAX = 1000;
 
 export type EventHubOptions = { eventDebug?: boolean };
