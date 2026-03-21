@@ -36,6 +36,7 @@ async function runUnitSuites(): Promise<SuiteResult[]> {
     (await import('./unit/friend-extract.test.ts')).run,
     (await import('./unit/poller-helpers.test.ts')).run,
     (await import('./unit/actions-helpers.test.ts')).run,
+    (await import('./unit/stable-post-key.test.ts')).run,
     (await import('./unit/hub.test.ts')).run,
     (await import('./unit/cookie-store.test.ts')).run,
     (await import('./unit/robustness.test.ts')).run,

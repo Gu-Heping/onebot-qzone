@@ -2,10 +2,9 @@ import { QzoneClient } from '../qzone/client.js';
 import type { BridgeConfig } from './config.js';
 import { EventHub } from './hub.js';
 import {
-  authorUinFromRaw,
   buildStablePostKey,
-  collectSeenLookupKeys,
-  stableTidFromRaw,
+  buildStablePostKeyFromItem,
+  seenLookupKeysForPost,
 } from './stablePostKey.js';
 import { safeInt } from './utils.js';
 import { htmlUnescape } from '../qzone/utils.js';
@@ -505,11 +504,9 @@ export class EventPoller {
   }
 
   /** 合并 canonical + 历史兼容键，供 seen 查询与持久化 */
-  private markSeenPostRaw(raw: Record<string, unknown>): void {
-    const author = authorUinFromRaw(raw);
-    const tid = stableTidFromRaw(raw);
-    const cellid = String(raw['cellid'] ?? '').trim() || undefined;
-    for (const k of collectSeenLookupKeys(author, tid, cellid)) {
+  private markSeenPostItem(item: NormalizedItem, raw: Record<string, unknown>): void {
+    if (!item.tid || !item.uin) return;
+    for (const k of seenLookupKeysForPost(item, raw)) {
       this.seenPostTids.add(k);
     }
   }
@@ -518,11 +515,9 @@ export class EventPoller {
     this.saveSeenTids();
   }
 
-  private isPostSeenRaw(raw: Record<string, unknown>): boolean {
-    const author = authorUinFromRaw(raw);
-    const tid = stableTidFromRaw(raw);
-    const cellid = String(raw['cellid'] ?? '').trim() || undefined;
-    return collectSeenLookupKeys(author, tid, cellid).some((k) => this.seenPostTids.has(k));
+  private isPostSeenItem(item: NormalizedItem, raw: Record<string, unknown>): boolean {
+    if (!item.tid || !item.uin) return true;
+    return seenLookupKeysForPost(item, raw).some((k) => this.seenPostTids.has(k));
   }
 
   start(): void {
@@ -762,26 +757,26 @@ export class EventPoller {
       if (!item.tid || !r) continue;
       this.cacheNormalizedItem(item);
       this.trackTids.add(item.tid);
-      const isNew = !this.isPostSeenRaw(r);
+      const isNew = !this.isPostSeenItem(item, r);
       this.logEventDebug(`[Poller:DEBUG] item tid=${item.tid?.slice(0,16)}, isNew=${isNew}`);
       if (isNew) {
-        const sk = buildStablePostKey(r);
+        const sk = buildStablePostKeyFromItem(item) || buildStablePostKey(r);
         const event = await buildPostEvent(item, selfId, {
           client: this.client,
           attachImageData: this.config.attachImageDataInEvents,
           maxPics: MAX_IMAGE_DATA_PER_EVENT,
         }, sk ? {
           stablePostKey: sk,
-          authorUin: authorUinFromRaw(r),
+          authorUin: item.uin,
           cellid: String(r['cellid'] ?? ''),
         } : undefined);
         this.logEventDebug(`[Poller:DEBUG] publishing event type=${event.post_type}`);
         await this.hub.publish(event);
-        this.markSeenPostRaw(r);
+        this.markSeenPostItem(item, r);
         this.flushSeenTidsImmediate();
         this.logEventDebug(`[Poller:DEBUG] publish done, subscribers=${this.hub.subscriberCount()}`);
         if (this.config.eventDebug) {
-          console.log(`[push][seen] myPosts keys=${collectSeenLookupKeys(authorUinFromRaw(r), stableTidFromRaw(r), String(r['cellid'] ?? '').trim() || undefined).join(',')}`);
+          console.log(`[push][seen] myPosts keys=${seenLookupKeysForPost(item, r).join(',')}`);
         }
       }
     }
@@ -799,23 +794,23 @@ export class EventPoller {
         const item = normalizeEmotion(r, selfId);
         if (!item.tid || !item.uin) continue;
         this.cacheNormalizedItem(item);
-        if (this.isPostSeenRaw(r)) continue;
-        const sk = buildStablePostKey(r);
+        if (this.isPostSeenItem(item, r)) continue;
+        const sk = buildStablePostKeyFromItem(item) || buildStablePostKey(r);
         const event = await buildPostEvent(item, selfId, {
           client: this.client,
           attachImageData: this.config.attachImageDataInEvents,
           maxPics: MAX_IMAGE_DATA_PER_EVENT,
         }, sk ? {
           stablePostKey: sk,
-          authorUin: authorUinFromRaw(r),
+          authorUin: item.uin,
           cellid: String(r['cellid'] ?? ''),
         } : undefined);
         (event as Record<string, unknown>)['_from_friend'] = true;
         await this.hub.publish(event);
-        this.markSeenPostRaw(r);
+        this.markSeenPostItem(item, r);
         this.flushSeenTidsImmediate();
         if (this.config.eventDebug) {
-          console.log(`[push][seen] friendFeeds keys=${collectSeenLookupKeys(authorUinFromRaw(r), stableTidFromRaw(r), String(r['cellid'] ?? '').trim() || undefined).join(',')}`);
+          console.log(`[push][seen] friendFeeds keys=${seenLookupKeysForPost(item, r).join(',')}`);
         }
       }
     } catch { /* skip */ }
