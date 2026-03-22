@@ -881,6 +881,11 @@ export class EventPoller {
         this.logEventDebug(`[Poller:DEBUG] comment id=${comment.commentId.slice(0,16)}, isNew=${isNew}`);
         if (isNew) {
           this.seenCommentIds.get(tid)!.add(comment.commentId);
+          // 本人发的评论不推送：否则 Bot 自动回复 → 产生新评论 → 再推送 → 死循环
+          if (String(comment.uin) === String(selfUin)) {
+            this.logEventDebug(`[Poller:DEBUG] skip publish own comment id=${comment.commentId.slice(0, 16)}`);
+            continue;
+          }
           const event = buildCommentEvent(comment, selfUin, tid, selfUin);
           this.logEventDebug(`[Poller:DEBUG] publishing comment event`);
           await this.hub.publish(event);
@@ -901,8 +906,10 @@ export class EventPoller {
         if (!this.seenLikeUins.has(tid)) this.seenLikeUins.set(tid, new Set());
         if (!this.seenLikeUins.get(tid)!.has(like.uin)) {
           this.seenLikeUins.get(tid)!.add(like.uin);
-          const event = buildLikeEvent(like, selfUin, tid, selfUin);
-          await this.hub.publish(event);
+          if (String(like.uin) !== String(selfUin)) {
+            const event = buildLikeEvent(like, selfUin, tid, selfUin);
+            await this.hub.publish(event);
+          }
         }
       }
       // 缓存点赞用户，用于计数兜底时匹配
@@ -945,11 +952,13 @@ export class EventPoller {
             const user = pendingUsers.find(u => u.uin && !seenUins.has(u.uin));
             if (user) {
               seenUins.add(user.uin);
-              const event = buildLikeEvent(
-                { uin: user.uin, nickname: user.nickname, createdTime: now() },
-                selfUin, tid, selfUin,
-              );
-              await this.hub.publish(event);
+              if (String(user.uin) !== String(selfUin)) {
+                const event = buildLikeEvent(
+                  { uin: user.uin, nickname: user.nickname, createdTime: now() },
+                  selfUin, tid, selfUin,
+                );
+                await this.hub.publish(event);
+              }
             } else {
               // 没有匹配的用户，发送空事件
               const event = buildLikeEvent(

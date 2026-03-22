@@ -1,5 +1,6 @@
 /**
  * 对**已启动**的 onebot-qzone HTTP 服务做真实请求校验（get_login_info / check_cookie / get_stranger_info）。
+ * 若 NapCat/OpenClaw 正订阅事件 WS，大量 HTTP 读请求可能间接触发轮询与缓存变化；写操作请用 verify:tools 并阅读其文件头警告。
  *
  * 用法（仓库根目录）：
  *   npx tsx scripts/verify-bridge-http.ts
