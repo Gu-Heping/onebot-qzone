@@ -1352,6 +1352,32 @@ export class QzoneClient {
   }
 
   // ──────────────────────────────────────────────
+  // feeds3 / ic2 JSONP → 可解析文本（供 parseFeeds3Items、hasMoreFeeds 检测）
+  // ──────────────────────────────────────────────
+  /** 将 ic2 返回的 JSONP 解出 data.data[].html 并拼到原文后，结构与 fetchFeeds3Html 一致 */
+  private decodeJsonpFeedsHtmlPayload(respText: string): string {
+    try {
+      const parsed = parseJsonp(respText) as Record<string, unknown> | undefined;
+      const dataArr = parsed?.data && typeof parsed.data === 'object' && Array.isArray((parsed.data as Record<string, unknown>).data)
+        ? (parsed.data as Record<string, unknown>).data as Array<Record<string, unknown>>
+        : null;
+      if (dataArr) {
+        const unescapeHtml = (s: string) => s.replace(/\\x22/g, '"').replace(/\\x3C/g, '<').replace(/\\\//g, '/');
+        const htmlPart = dataArr
+          .map((item) => unescapeHtml(String(item.html ?? '')))
+          .join('');
+        if (dataArr.length === 0) {
+          log('DEBUG', 'feeds3 jsonp: data.data is empty (server returned no feed items, may be 风控 or scope)');
+        } else {
+          log('DEBUG', `feeds3 jsonp: extracted html from ${dataArr.length} data.data items, combined length=${htmlPart.length}`);
+        }
+        return respText + '\n<!--FEEDS_HTML-->\n' + htmlPart;
+      }
+    } catch { /* fall through */ }
+    return respText.replace(/\\x22/g, '"').replace(/\\x3C/g, '<').replace(/\\\//g, '/');
+  }
+
+  // ──────────────────────────────────────────────
   // feeds3 缓存
   // ──────────────────────────────────────────────
   private async fetchFeeds3Html(
@@ -1420,30 +1446,7 @@ export class QzoneClient {
       `https://user.qzone.qq.com/proxy/domain/ic2.qzone.qq.com/cgi-bin/feeds/feeds3_html_more?${params.toString()}`;
     const resp = await this.get(url, { headers: this.pcHeaders(this.getQzreferrer()) });
     log('DEBUG', `feeds3 raw response length=${resp.text.length}, status=${resp.status}`);
-    let text: string;
-    try {
-      const parsed = parseJsonp(resp.text) as Record<string, unknown> | undefined;
-      const dataArr = parsed?.data && typeof parsed.data === 'object' && Array.isArray((parsed.data as Record<string, unknown>).data)
-        ? (parsed.data as Record<string, unknown>).data as Array<Record<string, unknown>>
-        : null;
-      if (dataArr) {
-        const unescapeHtml = (s: string) => s.replace(/\\x22/g, '"').replace(/\\x3C/g, '<').replace(/\\\//g, '/');
-        const htmlPart = dataArr
-          .map((item) => unescapeHtml(String(item.html ?? '')))
-          .join('');
-        if (dataArr.length === 0) {
-          log('DEBUG', 'feeds3: data.data is empty (server returned no feed items, may be 风控 or scope)');
-        } else {
-          log('DEBUG', `feeds3: extracted html from ${dataArr.length} data.data items, combined length=${htmlPart.length}`);
-        }
-        // 前面保留原始 JSONP，便于 extractExternparam / hasMoreFeeds 从 main 取值；后面是拼接的 HTML 供 parseFeeds3Items 解析
-        text = resp.text + '\n<!--FEEDS_HTML-->\n' + htmlPart;
-      } else {
-        text = resp.text.replace(/\\x22/g, '"').replace(/\\x3C/g, '<').replace(/\\\//g, '/');
-      }
-    } catch {
-      text = resp.text.replace(/\\x22/g, '"').replace(/\\x3C/g, '<').replace(/\\\//g, '/');
-    }
+    const text = this.decodeJsonpFeedsHtmlPayload(resp.text);
     log('DEBUG', `feeds3 decoded text length=${text.length}`);
     // Dump to file for debug (与 dumpDebugPayload 一致：cachePath/debug)
     if (env.debugDump) {
@@ -1468,6 +1471,161 @@ export class QzoneClient {
       this.feeds3CacheTime.delete(oldest);
     }
     return text;
+  }
+
+  /**
+   * ic2 `feeds_html_act_all`：浏览器「全部动态」类分页（start/count），与 feeds3_html_more / get_emotion_list 不同链路。
+   *
+   * **语义（与抓包一致）**：动态流归属由 **`hostuin`** 决定（服务端在 Cookie 权限允许时返回该号动态）；URL 里的 **`uin`** 多为 **页面/请求语境**（例如在谁的空间页里拉 ic2），**不**表示「条目作者 = uin」。
+   * - `hostuin` **省略**时桥接默认用 `this.qqNumber`，即与当前登录号一致。
+   * - `hostuin` **显式传他人**时（如好友），实机可返回 **该 hostuin 的说说**（与浏览器 `uin=空间页&hostuin=主人` 抓包一致），**不能**用「只看 uin」推断作者。
+   * 若仅需稳定拉「某 QQ 本人主页说说时间线」，仍优先 `getEmotionList` / feeds3（与 `start/count` 分页语义不同）。
+   *
+   * @param targetUin 请求参数 `uin`（页面语境）
+   * @param opts.hostUin 请求参数 `hostuin`；默认 `this.qqNumber`
+   */
+  async getFeedsHtmlActAll(
+    targetUin: string,
+    opts?: {
+      hostUin?: string;
+      start?: number;
+      count?: number;
+      scope?: number;
+      filter?: string;
+      flag?: string;
+      refresh?: string;
+      firstGetGroup?: string;
+      mixnocache?: string;
+      scene?: string;
+      refer?: string;
+      sidomain?: string;
+      useutf8?: string;
+      outputhtmlfeed?: string;
+      begintime?: string;
+      icServerTime?: string;
+      includeRawSnippet?: boolean;
+    },
+  ): Promise<ApiResponse> {
+    this.requireLogin();
+    const uin = String(targetUin ?? '').trim();
+    if (!uin) {
+      return { code: -1, message: '缺少 uin', msglist: [], has_more: false, _page_info: { source: 'feeds_html_act_all', error: true } };
+    }
+    const hostUin = String(opts?.hostUin ?? this.qqNumber ?? '').trim();
+    if (!hostUin) {
+      return { code: -1, message: '未登录或缺少 hostuin', msglist: [], has_more: false, _page_info: { source: 'feeds_html_act_all', error: true } };
+    }
+    const start = Math.max(0, Math.floor(opts?.start ?? 0));
+    const count = Math.max(1, Math.min(50, Math.floor(opts?.count ?? 10)));
+    const scope = opts?.scope != null ? Math.floor(opts.scope) : 0;
+    const filter = opts?.filter ?? 'all';
+    const flag = opts?.flag ?? '1';
+    const refresh = opts?.refresh ?? '0';
+    const firstGetGroup = opts?.firstGetGroup ?? '0';
+    const mixnocache = opts?.mixnocache ?? '0';
+    const scene = opts?.scene ?? '0';
+    const refer = opts?.refer ?? '2';
+    const sidomain = opts?.sidomain ?? 'qzonestyle.gtimg.cn';
+    const useutf8 = opts?.useutf8 ?? '1';
+    const outputhtmlfeed = opts?.outputhtmlfeed ?? '1';
+
+    const params = new URLSearchParams();
+    params.set('uin', uin);
+    params.set('hostuin', hostUin);
+    params.set('scope', String(scope));
+    params.set('filter', filter);
+    params.set('flag', flag);
+    params.set('refresh', refresh);
+    params.set('firstGetGroup', firstGetGroup);
+    params.set('mixnocache', mixnocache);
+    params.set('scene', scene);
+    params.set('start', String(start));
+    params.set('count', String(count));
+    params.set('sidomain', sidomain);
+    params.set('useutf8', useutf8);
+    params.set('outputhtmlfeed', outputhtmlfeed);
+    params.set('refer', refer);
+    params.set('r', String(Math.random()));
+    params.set('g_tk', String(this.getGtk()));
+    const bt = opts?.begintime?.trim();
+    if (bt && bt !== 'undefined') params.set('begintime', bt);
+    const icst = opts?.icServerTime?.trim();
+    if (icst) params.set('icServerTime', icst);
+
+    const url =
+      `https://user.qzone.qq.com/proxy/domain/ic2.qzone.qq.com/cgi-bin/feeds/feeds_html_act_all?${params.toString()}`;
+    try {
+      const resp = await this.get(url, { headers: this.pcHeaders(this.getQzreferrer()) });
+      log('DEBUG', `feeds_html_act_all raw len=${resp.text.length} status=${resp.status}`);
+      if (resp.status >= 400) {
+        return {
+          code: -1,
+          message: `HTTP ${resp.status}`,
+          msglist: [],
+          has_more: false,
+          http_status: resp.status,
+          _page_info: { source: 'feeds_html_act_all', start, count, uin, hostuin: hostUin },
+        };
+      }
+      const text = this.decodeJsonpFeedsHtmlPayload(resp.text);
+      const excluded = new Set(['217']);
+      const rawList = this.parseFeeds3Items(text, undefined, undefined, Math.max(count * 4, 80), false);
+      const filtered = rawList.filter((m) => !excluded.has(String(m['appid'] ?? '')));
+      /** 单次返回条数与请求 count 对齐（解析器偶会多吐 1 条） */
+      const beforeCap = filtered.length;
+      const msglist = filtered.slice(0, count);
+      for (const item of msglist) this.cachePostMetaFromRaw(item);
+
+      const explicitNoMore = /hasMoreFeeds\s*:\s*false/.test(text);
+      const explicitMore = /hasMoreFeeds\s*:\s*true/.test(text);
+      const has_more = explicitNoMore
+        ? false
+        : explicitMore
+          ? true
+          : beforeCap >= count;
+      const next_start = has_more ? start + count : start;
+
+      const pageInfo: Record<string, unknown> = {
+        source: 'feeds_html_act_all',
+        start,
+        count,
+        returned: msglist.length,
+        parsed_before_cap: beforeCap,
+        /** URL 参数：页面/语境 */
+        request_uin: uin,
+        /** 实际动态所属（与返回条目作者一致） */
+        feed_owner_uin: hostUin,
+        hostuin: hostUin,
+        scope,
+        pagination: 'start_count' as const,
+      };
+      if (uin !== hostUin) {
+        pageInfo.note =
+          'uin 为页面/请求语境，hostuin 为动态流主人（与浏览器抓包一致）。与 get_emotion_list 的 offset 分页不同，勿混用续翻。';
+      }
+
+      const out: ApiResponse = {
+        code: 0,
+        message: 'ok',
+        msglist,
+        has_more,
+        next_start,
+        _page_info: pageInfo,
+      };
+      if (opts?.includeRawSnippet) {
+        out._raw_snippet = resp.text.slice(0, 4000);
+      }
+      return out;
+    } catch (exc) {
+      log('ERROR', `feeds_html_act_all failed: ${exc}`);
+      return {
+        code: -1,
+        message: String(exc),
+        msglist: [],
+        has_more: false,
+        _page_info: { source: 'feeds_html_act_all', start, count, uin, hostuin: hostUin, error: true },
+      };
+    }
   }
 
   parseFeeds3Items(

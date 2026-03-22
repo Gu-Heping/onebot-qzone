@@ -406,6 +406,126 @@ export class ActionHandler {
     return ok(res, echo);
   }
 
+  /** ic2 feeds_html_act_all；可选 feed_owner=单 QQ 封装（=hostuin，且 uin 默认同号，模拟「在该人空间页」） */
+  async action_get_feeds_html_act_all(p: Record<string, unknown>, echo?: string): Promise<OneBotResponse> {
+    if (!this.client.loggedIn) return fail(1401, '未登录', echo);
+    const login = String(this.client.qqNumber ?? '').trim();
+    if (!login) return fail(1401, '未登录', echo);
+    const feedOwnerRaw = p['feed_owner'] ?? p['owner_qq'] ?? p['owner_uin'] ?? p['space_uin'] ?? p['qq'];
+    const feedOwner = feedOwnerRaw != null && String(feedOwnerRaw).trim() !== '' ? String(feedOwnerRaw).trim() : '';
+
+    let urlUin: string;
+    let hostUin: string;
+    if (feedOwner) {
+      hostUin = feedOwner;
+      const pageUin = String(p['user_id'] ?? p['uin'] ?? p['page_uin'] ?? '').trim();
+      urlUin = pageUin || feedOwner;
+    } else {
+      urlUin = String(p['user_id'] ?? p['uin'] ?? '').trim() || login;
+      const hostUinRaw = p['host_uin'] ?? p['hostuin'];
+      hostUin = hostUinRaw != null && String(hostUinRaw).trim() !== '' ? String(hostUinRaw).trim() : login;
+    }
+
+    const start0 = Math.max(0, safeInt(p['start'] ?? 0));
+    const count = Math.max(1, Math.min(50, safeInt(p['count'] ?? p['num'] ?? 10)));
+    const scope = p['scope'] != null && p['scope'] !== '' ? safeInt(p['scope']) : undefined;
+    const includeImageData = p['include_image_data'] === true || p['include_image_data'] === '1' || p['include_image_data'] === 'true';
+    const includeRawSnippet = p['include_raw_snippet'] === true || p['include_raw_snippet'] === '1';
+    const allPages = p['all_pages'] === true || p['all_pages'] === '1' || p['all_pages'] === 'true'
+      || p['fetch_all'] === true || p['fetch_all'] === '1';
+    const maxRounds = Math.max(1, Math.min(80, safeInt(p['max_rounds'] ?? p['max_pages'] ?? 30)));
+
+    const clientOpts = {
+      hostUin,
+      count,
+      scope,
+      filter: p['filter'] != null ? String(p['filter']) : undefined,
+      flag: p['flag'] != null ? String(p['flag']) : undefined,
+      refresh: p['refresh'] != null ? String(p['refresh']) : undefined,
+      refer: p['refer'] != null ? String(p['refer']) : undefined,
+      includeRawSnippet,
+    };
+
+    if (!allPages) {
+      const res = await this.client.getFeedsHtmlActAll(urlUin, { ...clientOpts, start: start0 });
+      if (res && typeof res === 'object') {
+        ensureReadableTimeOnMsglist(res as Record<string, unknown>);
+        if (includeImageData) {
+          await this.enrichMsglistWithImageData(res as Record<string, unknown>, MAX_IMAGE_DATA_PER_POST, MAX_IMAGE_DATA_PER_RESPONSE);
+        }
+      }
+      return ok(res, echo);
+    }
+
+    /** 自动翻页：合并说说/分享等全部 appid，按 tid 去重，直到无更多或达 max_rounds */
+    const merged: Record<string, unknown>[] = [];
+    const seenTid = new Set<string>();
+    let start = start0;
+    let prevStart = -1;
+    let lastHasMore = false;
+    let truncated = false;
+    let lastNextStart = start0;
+    let rounds = 0;
+
+    for (; rounds < maxRounds; rounds++) {
+      if (start === prevStart) break;
+      prevStart = start;
+      const page = await this.client.getFeedsHtmlActAll(urlUin, { ...clientOpts, start });
+      if (page['code'] != null && Number(page['code']) !== 0) {
+        return ok(page, echo);
+      }
+      const list = (page['msglist'] as Record<string, unknown>[] | undefined) ?? [];
+      lastHasMore = Boolean(page['has_more']);
+      const ns = page['next_start'];
+      lastNextStart = typeof ns === 'number' && Number.isFinite(ns) ? ns : start + count;
+
+      for (const m of list) {
+        const tid = String(m['tid'] ?? m['cellid'] ?? '').trim();
+        if (tid) {
+          if (seenTid.has(tid)) continue;
+          seenTid.add(tid);
+        }
+        merged.push(m);
+      }
+
+      if (!lastHasMore) break;
+      if (list.length === 0) break;
+      const nextS = typeof page['next_start'] === 'number' && Number.isFinite(page['next_start'] as number)
+        ? (page['next_start'] as number)
+        : start + count;
+      if (nextS <= start) break;
+      start = nextS;
+    }
+    if (lastHasMore && rounds >= maxRounds) truncated = true;
+
+    const res: Record<string, unknown> = {
+      code: 0,
+      message: 'ok',
+      msglist: merged,
+      has_more: truncated ? true : lastHasMore,
+      next_start: truncated ? lastNextStart : undefined,
+      _page_info: {
+        source: 'feeds_html_act_all',
+        all_pages: true,
+        rounds,
+        per_page_count: count,
+        start_initial: start0,
+        unique_items: merged.length,
+        truncated_by_max_rounds: truncated,
+        max_rounds: maxRounds,
+        request_uin: urlUin,
+        feed_owner_uin: hostUin,
+        hostuin: hostUin,
+        note: '合并多页 ic2 动态（含说说、音乐分享等），不按 appid 过滤；受 max_rounds 与接口限制，未必是历史全部',
+      },
+    };
+    ensureReadableTimeOnMsglist(res);
+    if (includeImageData && merged.length > 0) {
+      await this.enrichMsglistWithImageData(res, MAX_IMAGE_DATA_PER_POST, MAX_IMAGE_DATA_PER_RESPONSE);
+    }
+    return ok(res, echo);
+  }
+
   async action_get_comment_list(p: Record<string, unknown>, echo?: string): Promise<OneBotResponse> {
     if (!this.client.loggedIn) return fail(1401, '未登录', echo);
     const tidRaw = String(p['tid'] ?? '');
