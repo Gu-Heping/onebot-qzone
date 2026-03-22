@@ -335,7 +335,7 @@ npm run typecheck        # TypeScript 类型检查
 npm run verify           # 端点健康检查（读 + 写）
 npm run verify:readonly  # 端点健康检查（仅读接口）
 npm run verify:http      # 对已启动 bridge 做 HTTP 登录/昵称抽检
-npm run verify:tools     # HTTP 对齐全部 qzone 工具对应 action（可加 --write）
+npm run verify:tools     # HTTP 对齐全部 qzone 工具对应 action（可加 --write / --strict）
 ```
 
 ### 测试说明
@@ -343,8 +343,13 @@ npm run verify:tools     # HTTP 对齐全部 qzone 工具对应 action（可加 
 - **单元测试**：`test/unit/` 下 10 个测试套件，共 127 项，纯本地运行不需要登录。
 - **API 测试**：需先启动 bridge 并登录，`--readonly` 模式仅验证读接口。
 - **端点健康检查**：`scripts/verify-endpoints.ts`，启动即检验 8 个读 + 2 个写端点，输出彩色 PASS/FAIL/SKIP 报告。
-- **HTTP 全量工具**：`scripts/verify-all-qzone-tools-http.ts`（`verify:tools`），对 `127.0.0.1:ONEBOT_PORT` 真实 POST；`fetch_image` 白名单含 `qlogo*.store.qq.com` 等与头像 URL 一致。
+- **HTTP 全量工具**：`scripts/verify-all-qzone-tools-http.ts`（`verify:tools`），对 `127.0.0.1:ONEBOT_PORT` 真实 POST；加 **`--strict`** 时除「有返回」外还要求首条说说/详情等结构完整；`fetch_image` 白名单含 `qlogo*.store.qq.com` 等与头像 URL 一致。
 - **真实数据回归**：`npx tsx test/verify-real-feeds.ts`（需配置 Cookie）会校验 getEmotionList/getFriendFeeds、归一化结果，并输出含图说说数、多级评论（一级/二级/有回复的帖子数）、含图评论数。
+
+### Bot 重复回复评论 / 验收脚本副作用
+
+- **根因（桥接）**：轮询发现「新评论」会上报 EventHub。若 **评论者就是当前登录号**（Bot 在自己空间下自评），旧逻辑仍会推送，上游再自动回复 → **死循环**。已在 `poller` 中 **跳过推送本人评论与本人点赞**（仍会记入 `seen*`，避免反复当「新」）。
+- **验收脚本**：`verify:tools --write` 会真实发说说、点赞，**会触发 WS 事件**；读请求也会更新评论缓存。生产验收可临时关 `ONEBOT_EMIT_COMMENT_EVENTS` 等，详见脚本文件头说明。
 
 ### 调试获取评论
 

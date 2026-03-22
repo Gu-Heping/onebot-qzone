@@ -1,9 +1,13 @@
 /**
- * 对运行中的 onebot-qzone HTTP 服务做**全量只读**校验（与 OpenClaw napcat-qq `qzone_*` 工具对应的桥接 action）。
+ * 对运行中的 onebot-qzone HTTP 服务做**全量**校验（与 OpenClaw napcat-qq `qzone_*` 工具对应的桥接 action）。
  *
- * 默认不执行发说说/点赞等写操作；需要时加 `--write`。
+ * ⚠️ **副作用（会惊动接在 WS 上的 Bot）**
+ * - 任意 HTTP 读接口会刷新桥内 `getCommentsBestEffort` 等缓存；轮询器仍在跑时，可能改变「已见评论」与接口返回的时序。
+ * - `--write` 会真实 **发说说 / 点赞**，轮询极可能向 **EventHub → NapCat → OpenClaw** 推送 `notice`/动态事件，**不是纯本地测试**。
+ * - 若要在生产 Bot 上验收，建议临时 `ONEBOT_EMIT_COMMENT_EVENTS=0` 等关掉上报，或换无 WS 订阅的测试实例。
  *
  *   npx tsx scripts/verify-all-qzone-tools-http.ts
+ *   npx tsx scripts/verify-all-qzone-tools-http.ts --strict   # 有数据但结构异常也判失败
  *   npx tsx scripts/verify-all-qzone-tools-http.ts --write
  *
  * 环境：`.env` 中 ONEBOT_PORT / ONEBOT_ACCESS_TOKEN；桥接需已登录（与本机 verify:http 相同）。
@@ -18,6 +22,7 @@ const TIMEOUT_MS = Math.max(15_000, Number(process.env['ONEBOT_VERIFY_TIMEOUT_MS
 
 const args = process.argv.slice(2);
 const DO_WRITE = args.includes('--write');
+const STRICT = args.includes('--strict');
 
 type Level = 'pass' | 'fail' | 'skip' | 'warn';
 
@@ -72,6 +77,32 @@ function firstTidFromMsglist(data: unknown): string {
   return String(first?.['tid'] ?? first?.['cellid'] ?? '').trim();
 }
 
+/** strict：首条说说需含 tid + uin 类字段 */
+function emotionFirstItemIssues(data: unknown): string | null {
+  const o = asObj(data);
+  const list = o?.['msglist'];
+  if (!Array.isArray(list) || list.length === 0) return 'msglist 为空';
+  const first = asObj(list[0]);
+  if (!first?.['tid'] && !first?.['cellid']) return '首条缺 tid/cellid';
+  const uin = first['uin'] ?? first['opuin'];
+  if (uin == null || String(uin).trim() === '') return '首条缺 uin/opuin';
+  return null;
+}
+
+/** strict：详情里至少应有正文或时间类字段之一 */
+function postDetailIssues(data: unknown): string | null {
+  const o = asObj(data);
+  if (!o || Object.keys(o).length === 0) return 'data 为空对象';
+  const has =
+    o['content'] != null ||
+    o['con'] != null ||
+    o['text'] != null ||
+    o['createTime'] != null ||
+    o['created_time'] != null;
+  if (!has) return '缺 content/con/text/createTime 等可读字段';
+  return null;
+}
+
 function firstAlbumId(data: unknown): string {
   const o = asObj(data);
   if (!o || o['_empty']) return '';
@@ -91,7 +122,12 @@ function firstAlbumId(data: unknown): string {
 }
 
 async function main(): Promise<void> {
-  console.log(`\n═══ verify-all-qzone-tools-http ${BASE} write=${DO_WRITE} timeout=${TIMEOUT_MS}ms ═══\n`);
+  console.log(
+    `\n═══ verify-all-qzone-tools-http ${BASE} write=${DO_WRITE} strict=${STRICT} timeout=${TIMEOUT_MS}ms ═══\n`,
+  );
+  if (DO_WRITE) {
+    console.log('⚠️  --write 会向空间写数据并可能触发事件上报，确认已了解副作用。\n');
+  }
 
   // ── qzone_status（拆成三个 action）──
   {
@@ -112,7 +148,8 @@ async function main(): Promise<void> {
     if (isOk(r) && d && d['user_id'] != null) {
       selfUin = String(d['user_id']);
       loginNick = String(d['nickname'] ?? '');
-      const level = loginNick && loginNick !== 'QZone用户' ? 'pass' : 'warn';
+      let level: Level = loginNick && loginNick !== 'QZone用户' ? 'pass' : 'warn';
+      if (STRICT && level === 'warn') level = 'fail';
       record('qzone_status', 'get_login_info', level, `user_id=${selfUin} nickname=${loginNick || '(空)'}`);
     } else record('qzone_status', 'get_login_info', 'fail', JSON.stringify(r).slice(0, 200));
   }
@@ -136,7 +173,14 @@ async function main(): Promise<void> {
     const d = r.data;
     sampleTid = firstTidFromMsglist(d);
     if (isOk(r) && asObj(d) && Array.isArray(asObj(d)?.['msglist'])) {
-      record('qzone_get_posts', 'get_emotion_list', 'pass', `msglist=${(asObj(d)?.['msglist'] as unknown[]).length} tid=${sampleTid || '无'}`);
+      const struct = emotionFirstItemIssues(d);
+      let level: Level = 'pass';
+      let detail = `msglist=${(asObj(d)?.['msglist'] as unknown[]).length} tid=${sampleTid || '无'}`;
+      if (struct) {
+        level = STRICT ? 'fail' : 'warn';
+        detail += ` | 结构:${struct}`;
+      }
+      record('qzone_get_posts', 'get_emotion_list', level, detail);
     } else record('qzone_get_posts', 'get_emotion_list', 'fail', JSON.stringify(r).slice(0, 200));
   }
 
@@ -186,8 +230,16 @@ async function main(): Promise<void> {
   if (sampleTid && selfUin) {
     {
       const r = await post('get_msg', { user_id: selfUin, message_id: sampleTid, tid: sampleTid });
-      if (isOk(r) && r.data != null) record('qzone_get_post_detail', 'get_msg', 'pass', `tid=${sampleTid.slice(0, 12)}…`);
-      else record('qzone_get_post_detail', 'get_msg', 'fail', JSON.stringify(r).slice(0, 200));
+      if (isOk(r) && r.data != null) {
+        const pi = postDetailIssues(r.data);
+        let level: Level = 'pass';
+        let detail = `tid=${sampleTid.slice(0, 12)}…`;
+        if (pi) {
+          level = STRICT ? 'fail' : 'warn';
+          detail += ` | ${pi}`;
+        }
+        record('qzone_get_post_detail', 'get_msg', level, detail);
+      } else record('qzone_get_post_detail', 'get_msg', 'fail', JSON.stringify(r).slice(0, 200));
     }
     {
       const r = await post('get_feed_images', { user_id: selfUin, tid: sampleTid });
@@ -283,8 +335,10 @@ async function main(): Promise<void> {
     const d = asObj(r.data);
     if (isOk(r) && d) {
       const aid = firstAlbumId(r.data);
-      if (d['_empty']) record('qzone_get_albums', 'get_album_list', 'warn', '_empty（接口无列表或权限）');
-      else record('qzone_get_albums', 'get_album_list', 'pass', aid ? `album=${aid}` : '无 album id');
+      if (d['_empty']) {
+        const level: Level = STRICT ? 'fail' : 'warn';
+        record('qzone_get_albums', 'get_album_list', level, '_empty（接口无列表或权限）');
+      } else record('qzone_get_albums', 'get_album_list', 'pass', aid ? `album=${aid}` : '无 album id');
       if (aid && selfUin) {
         const r2 = await post('get_photo_list', { user_id: selfUin, album_id: aid, num: 10 });
         if (isOk(r2)) record('qzone_get_photos', 'get_photo_list', 'pass', 'ok');
