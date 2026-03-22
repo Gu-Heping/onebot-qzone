@@ -149,6 +149,23 @@ const cases: TestCase[] = [
     },
   },
   {
+    name: '评论事件 self_id 数字与字符串指纹一致应去重',
+    fn: async () => {
+      const hub = new EventHub();
+      let count = 0;
+      hub.subscribe(() => { count++; });
+      const base = {
+        post_type: 'notice',
+        notice_type: 'qzone_comment',
+        post_tid: 'tid_hex_1',
+        comment_id: 'cmt_9',
+      } as any;
+      await hub.publish({ ...base, self_id: 2492835361 });
+      await hub.publish({ ...base, self_id: '2492835361' });
+      assert(count === 1, 'self_id 形态不同不应重复下发');
+    },
+  },
+  {
     name: '不同动态事件不应被错误去重',
     fn: async () => {
       const hub = new EventHub();

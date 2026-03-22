@@ -349,6 +349,7 @@ npm run verify:tools     # HTTP 对齐全部 qzone 工具对应 action（可加 
 ### Bot 重复回复评论 / 验收脚本副作用
 
 - **根因（桥接）**：轮询发现「新评论」会上报 EventHub。若 **评论者就是当前登录号**（Bot 在自己空间下自评），旧逻辑仍会推送，上游再自动回复 → **死循环**。已在 `poller` 中 **跳过推送本人评论与本人点赞**（仍会记入 `seen*`，避免反复当「新」）。
+- **他人评论也重复推送**：`trackTids` 超过上限会 **裁剪**旧 tid；此前实现会同时 **删掉** `seenCommentIds` / `seenLikeUins`。该帖再次进入「最近说说」后，所有旧评论会被当成全新 → **同一评论多次上报**。现已 **保留**已见评论/点赞集合，仅删 `commentWarmTids` / `knownCounts` 等与「是否见过」无关的缓存。
 - **验收脚本**：`verify:tools --write` 会真实发说说、点赞，**会触发 WS 事件**；读请求也会更新评论缓存。生产验收可临时关 `ONEBOT_EMIT_COMMENT_EVENTS` 等，详见脚本文件头说明。
 
 ### 调试获取评论
