@@ -159,6 +159,52 @@ const cases: TestCase[] = [
       assert(count === 2, '不同事件应正常下发');
     },
   },
+  {
+    name: '_stable_post_key 与 _author_uin+_tid 应视为同一帖去重',
+    fn: async () => {
+      const hub = new EventHub();
+      let count = 0;
+      hub.subscribe(() => { count++; });
+      const withStable = {
+        post_type: 'message',
+        self_id: 10001,
+        _tid: 'fgafhjdhhb',
+        _stable_post_key: '2492835361:fgafhjdhhb',
+        sender: { user_id: 2492835361, nickname: 'x' },
+      } as any;
+      const withAuthorTidOnly = {
+        post_type: 'message',
+        self_id: 10001,
+        _tid: 'fgafhjdhhb',
+        _author_uin: '2492835361',
+        message_id: 0,
+      } as any;
+      await hub.publish(withStable);
+      await hub.publish(withAuthorTidOnly);
+      assert(count === 1, '同一作者+tid 不同字段形态应去重');
+    },
+  },
+  {
+    name: 'sender.user_id 与 _stable_post_key 应视为同一帖去重',
+    fn: async () => {
+      const hub = new EventHub();
+      let count = 0;
+      hub.subscribe(() => { count++; });
+      await hub.publish({
+        post_type: 'message',
+        self_id: 10001,
+        _tid: 'abc',
+        _stable_post_key: '888:abc',
+      } as any);
+      await hub.publish({
+        post_type: 'message',
+        self_id: 10001,
+        _tid: 'abc',
+        sender: { user_id: 888 },
+      } as any);
+      assert(count === 1, 'sender.user_id 应对齐 stable 指纹');
+    },
+  },
 ];
 
 export async function run() {
