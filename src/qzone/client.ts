@@ -1731,14 +1731,14 @@ export class QzoneClient {
   // Emotion list（仅 feeds3，PC/mobile 接口已移除）
   // ──────────────────────────────────────────────
   async getEmotionList(
-    uin?: string, pos = 0, num = 50, _ftype = 0, _sort = 0, _replynum = 10, maxPages = 15,
+    uin?: string, pos = 0, num = 50, _ftype = 0, _sort = 0, _replynum = 10, maxPages = 15, cursor?: string,
   ): Promise<ApiResponse> {
     this.requireLogin();
     const targetUin = uin ?? this.qqNumber!;
-    return this.getEmotionListViaFeeds3(targetUin, num, pos, maxPages);
+    return this.getEmotionListViaFeeds3(targetUin, num, pos, maxPages, cursor ?? '');
   }
 
-  private async getEmotionListViaFeeds3(uin: string, num = 50, pos = 0, maxPages = 15): Promise<ApiResponse> {
+  private async getEmotionListViaFeeds3(uin: string, num = 50, pos = 0, maxPages = 15, initialCursor = ''): Promise<ApiResponse> {
     try {
       /** 与 getFriendFeeds 一致：个人流里常混入 appid=217「点赞记录」等，非用户发的说说 */
       const excludedEmotionAppids = new Set(['217']);
@@ -1747,14 +1747,59 @@ export class QzoneClient {
 
       const isOwn = uin === this.qqNumber;
       let text = '';
-      let msglist: Record<string, unknown>[];
+      let msglist: Record<string, unknown>[] = [];
       let usedScope = 1;
       /** 是否用 scope=0 + uinlist=目标用户 拉取 */
       let useUinlist = false;
       /** 是否用「好友动态流 scope=0 无 uinlist + 按 uin 过滤」拉取（与 getFriendFeeds 同款请求，唯一稳定有数据的路径） */
       let useFilterFromStream = false;
 
-      if (!isOwn) {
+      const ic = initialCursor.trim();
+      let cursorWorked = false;
+      if (ic) {
+        if (isOwn) {
+          log('DEBUG', `feeds3 continuation: cursor len=${ic.length} own uin=${uin}`);
+          text = await this.fetchFeeds3Html(uin, true, 1, 50, ic);
+          msglist = dropEmotionNoise(this.parseFeeds3Items(text, uin, undefined, pos + num));
+        } else {
+          log('DEBUG', `feeds3 continuation: cursor len=${ic.length} target uin=${uin}`);
+          text = await this.fetchFeeds3Html(uin, true, 1, 50, ic);
+          msglist = dropEmotionNoise(this.parseFeeds3Items(text, uin, undefined, pos + num));
+          if (msglist.length === 0) {
+            text = await this.fetchFeeds3Html(this.qqNumber!, false, 0, 20, ic, undefined, 'all', 'all');
+            const friends0 = this.extractFriendsFromFeeds3FromText(text);
+            if (friends0.length) this.mergeFriendCache(friends0);
+            msglist = dropEmotionNoise(this.parseFeeds3Items(text, uin, undefined, pos + num, false));
+            if (msglist.length > 0) {
+              usedScope = 0;
+              useFilterFromStream = true;
+            }
+          }
+          if (msglist.length === 0) {
+            text = await this.fetchFeeds3Html(this.qqNumber!, true, 0, 50, ic, uin);
+            const friends1 = this.extractFriendsFromFeeds3FromText(text);
+            if (friends1.length) this.mergeFriendCache(friends1);
+            msglist = dropEmotionNoise(this.parseFeeds3Items(text, uin, undefined, pos + num));
+            if (msglist.length > 0) {
+              usedScope = 0;
+              useUinlist = true;
+            }
+          }
+          if (msglist.length === 0) {
+            text = await this.fetchFeeds3Html(uin, true, 0, 50, ic);
+            const friends2 = this.extractFriendsFromFeeds3FromText(text);
+            if (friends2.length) this.mergeFriendCache(friends2);
+            msglist = dropEmotionNoise(this.parseFeeds3Items(text, uin, undefined, pos + num));
+            usedScope = 0;
+          }
+        }
+        cursorWorked = msglist.length > 0;
+        if (!cursorWorked) {
+          log('WARN', 'feeds3 continuation: cursor 未解析到说说，回退到首页策略');
+        }
+      }
+
+      if (!cursorWorked && !isOwn) {
         // 策略 0（指定用户优先）：用 scope=0 好友说说流（与 getFriendFeeds 同款请求），按 opuin 过滤
         // 注意：scope=1 的 JS 数组含「活动记录」（如好友点赞），uin 是活动者而非帖子作者，
         //       会把 bot 自己的帖子误判为目标好友的帖子。scope=0 feed_data 用 opuin 严格校验，更可靠。
@@ -1767,11 +1812,11 @@ export class QzoneClient {
           usedScope = 0;
           useFilterFromStream = true;
         }
-      } else {
+      } else if (!cursorWorked) {
         msglist = [];
       }
 
-      if (msglist.length === 0) {
+      if (!cursorWorked && msglist.length === 0) {
         // 策略 1：scope=1（个人说说模式）；好友时后端常返回空。过滤 217 后若为空则继续走后续策略
         log('DEBUG', `feeds3 fallback: trying scope=1 for uin=${uin}`);
         text = await this.fetchFeeds3Html(uin, true, 1, 50);
@@ -1782,7 +1827,7 @@ export class QzoneClient {
         }
       }
 
-      if (msglist.length === 0 && !isOwn) {
+      if (!cursorWorked && msglist.length === 0 && !isOwn) {
         // 策略 2：scope=0 + uinlist=好友（后端可能不支持或返回空）
         log('DEBUG', `feeds3 fallback: scope=1 empty for friend, trying scope=0 with uinlist=${uin}`);
         text = await this.fetchFeeds3Html(this.qqNumber!, true, 0, 50, '', uin);
@@ -1795,7 +1840,7 @@ export class QzoneClient {
         }
       }
 
-      if (msglist.length === 0) {
+      if (!cursorWorked && msglist.length === 0) {
         // 策略 3：scope=0 无 uinlist，uin=目标，再按 uin 过滤
         log('DEBUG', 'feeds3 fallback: trying scope=0 without uinlist');
         text = await this.fetchFeeds3Html(uin, true, 0, 50);
@@ -1818,6 +1863,8 @@ export class QzoneClient {
       let currentText = text;
       /** 末页 HTML：用于 hasMoreFeeds / next_cursor（与 getFriendFeeds 语义对齐） */
       let lastListPageText = text;
+      let emptySkipStreak = 0;
+      const MAX_EMPTY_SKIPS = 10;
       while (msglist.length < pos + num && remainingPages > 0) {
         const externparam = this.extractExternparam(currentText);
         if (!externparam) {
@@ -1847,7 +1894,15 @@ export class QzoneClient {
           }
         }
         log('DEBUG', `feeds3 pagination: page returned ${page.length} items, ${added} new after dedup`);
-        if (added === 0) break;
+        if (added === 0) {
+          emptySkipStreak++;
+          if (emptySkipStreak >= MAX_EMPTY_SKIPS) {
+            log('DEBUG', `feeds3 pagination: stopping after ${MAX_EMPTY_SKIPS} pages with no new tids`);
+            break;
+          }
+        } else {
+          emptySkipStreak = 0;
+        }
       }
 
       // ── 解析并缓存 feeds3 内嵌评论 ──
@@ -1899,6 +1954,8 @@ export class QzoneClient {
       const returnedLen = msglist.length;
       const next_pos = pos + returnedLen;
       const buffer_has_more = next_pos < fullLen;
+      const next_page_uses_cursor =
+        Boolean(next_cursor && hasMoreFeedsOnLastPage && next_pos >= fullLen);
       const has_more = buffer_has_more || (Boolean(next_cursor) && hasMoreFeedsOnLastPage);
 
       for (const item of msglist) this.cachePostMetaFromRaw(item);
@@ -1916,7 +1973,10 @@ export class QzoneClient {
         full_fetched_len: fullLen,
         truncated_by_max_pages,
         pagination: 'offset' as const,
-        hint: '下一页请调用 get_emotion_list 并传 pos=next_pos（与 OpenClaw 工具 offset 同义）',
+        next_page_uses_cursor,
+        hint: next_page_uses_cursor
+          ? '本缓冲已用尽 offset：下一页请传 cursor=本响应 next_cursor（与 OpenClaw qzone_get_posts 的 cursor 同义），pos/offset 用 0'
+          : '下一页请调用 get_emotion_list 并传 pos=next_pos（与 OpenClaw 工具 offset 同义）；若 _page_info.next_page_uses_cursor 为 true 则须用 cursor 续翻',
       };
       log(
         'DEBUG',

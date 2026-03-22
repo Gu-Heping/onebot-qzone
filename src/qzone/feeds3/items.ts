@@ -218,8 +218,8 @@ export function parseFeeds3Items(
       }
     }
 
-    // data-uin 已与 filterUin 对齐；id="feed_*" 首段常为空间内部映射 uin，不能与展示 QQ 强比对
-    if (filterUin && !matchedBlock) continue;
+    // id="feed_*" 块用于 appid/时间戳/局部 HTML；部分模板或截断下 feed_data 与 feed_* 无法配对。
+    // data-uin 已与 filterUin 对齐时，丢弃会导致「首页明明多条说说、解析只有一条」；仍保留条目（cmtnum/图等可能略弱）。
     if (filterAppid && matchedBlock && matchedBlock.appid !== filterAppid) continue;
 
     const blockTypeidForLog = matchedBlock?.typeid ?? '';

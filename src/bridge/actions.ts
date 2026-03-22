@@ -455,7 +455,10 @@ export class ActionHandler {
     const pos = safeInt(p['pos'] ?? 0);
     const num = Math.max(1, Math.min(200, safeInt(p['num'] ?? 50)));
     const maxPages = Math.max(1, Math.min(30, safeInt(p['max_pages'] ?? p['pages'] ?? 15)));
-    const res = await this.client.getEmotionList(uin, pos, num, undefined, undefined, undefined, maxPages);
+    const cursorRaw = p['cursor'] ?? p['next_cursor'];
+    const cursor =
+      cursorRaw != null && String(cursorRaw).trim() !== '' ? String(cursorRaw).trim() : undefined;
+    const res = await this.client.getEmotionList(uin, pos, num, undefined, undefined, undefined, maxPages, cursor);
     if (res && typeof res === 'object') {
       ensureReadableTimeOnMsglist(res as Record<string, unknown>);
       const includeImageData = p['include_image_data'] !== false && p['include_image_data'] !== '0';

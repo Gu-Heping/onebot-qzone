@@ -48,7 +48,7 @@
   - **优先**：用 `fetchFeeds3Html(this.qqNumber!, false, 0, 50)`（与 getFriendFeeds 完全一致：**forceRefresh=false**，同一 cacheKey）拿到混合流，`parseFeeds3Items(..., targetUin, ...)` 过滤。
   - **交叉验证 / Bug 修复**：策略 0 必须与 getFriendFeeds 共用缓存（forceRefresh=false）。若用 true，会强制刷新并可能用空响应覆盖有效缓存，导致「获取动态有数据、指定用户无」或反过来污染缓存。
   - 若有结果则直接使用并标记来源（`scope=0+filter`）；若无结果再走策略 1/2/3。
-- **opuin 校验**：指定用户过滤时 `parseFeeds3Items(..., filterUin)` 只保留 `id="feed_{opuin}_..."` 中 opuin = 目标用户的块，避免错位混入他人内容。
+- **data-uin 过滤**：指定用户时 `parseFeeds3Items(..., filterUin)` 以 **`feed_data` 的 `data-uin`** 为主；`id="feed_*"` 块用于补 appid/时间戳等，**缺失时仍保留**该条（与本人/好友主页新模板兼容），混流错位风险由 `data-uin ≠ filterUin` 过滤承担。
 
 ## 说说列表里显示 uin（排查混数据）
 

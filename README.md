@@ -251,7 +251,7 @@ QZONE_PLAYWRIGHT_HEADLESS=1 npm run dev
 | `send_msg` / `send_private_msg` | 发布说说 | `message`（支持 CQ 码图片）；@ 人用 `@{uin:QQ号,nick:昵称}` |
 | `delete_msg` | 删除说说 | `message_id` |
 | `get_msg` | 获取说说详情 | `user_id`, `message_id` |
-| `get_emotion_list` | 获取说说列表 | `user_id`, `pos`, `num`；默认附带图片 base64（`include_image_data=false` 可关闭） |
+| `get_emotion_list` | 获取说说列表（feeds3） | `user_id`, `pos`, `num`, `max_pages`；可选 **`cursor` / `next_cursor`**（上一响应 `next_cursor` 原样，续页常与 `pos=0` 同用）；默认附带图片 base64（`include_image_data=false` 可关闭）。返回含 `has_more`、`next_pos`、`next_cursor`、`_page_info`（含 `full_fetched_len`、`next_page_uses_cursor` 等） |
 | `send_comment` | 发送评论 | `target_uin`, `target_tid`, `content` |
 | `delete_comment` | 删除评论 | `uin`, `tid`, `comment_id` |
 | `get_comment_list` | 获取评论列表 | `user_id`, `tid` |
@@ -286,7 +286,7 @@ QZONE_PLAYWRIGHT_HEADLESS=1 npm run dev
 
 **说说图片与 base64**：默认情况下，`get_emotion_list` / `get_friend_feeds` 会在每条说说的 `pic` 项中附带 `base64`（桥接用 Cookie+Referer 向 QZone CDN 拉取），单条最多 5 张、单次响应最多 20 张；传 `include_image_data=false` 可关闭以省流量。推送的新说说事件中也会默认附带图片 base64（`message` 中 image 段带 `file: 'base64://...'`），可通过环境变量 `ONEBOT_ATTACH_IMAGE_DATA=0` 关闭。单独拉取某张图时可用 `fetch_image`（参数 `url` 或 `urls`），仅接受白名单域名。
 
-**与 openclaw-napcat-qq 配合**：搭配 [openclaw-napcat-qq](https://github.com/Gu-Heping/openclaw-napcat-qq) 时，插件会将上述 base64 写入临时文件并在 `qzone_get_friend_feeds` / `qzone_get_posts` 结果中返回**本地路径**，Agent 用 **image** 工具传入该路径即可识图。若图片拉取出现 502，请将腾讯 CDN 域名（如 `photo.store.qq.com`、`qpic.cn`、`qzonestyle.gtimg.cn`）设为代理 **DIRECT**，详见 [docs/SERVER_DEBUG.md](docs/SERVER_DEBUG.md)。
+**与 openclaw-napcat-qq 配合**：搭配 [openclaw-napcat-qq](https://github.com/Gu-Heping/openclaw-napcat-qq) 时，插件会将上述 base64 写入临时文件并在 `qzone_get_friend_feeds` / `qzone_get_posts` 结果中返回**本地路径**，Agent 用 **image** 工具传入该路径即可识图。插件 **`qzone_get_posts`** 的 **`cursor`** 参数与桥接 **`get_emotion_list`** 的 **`cursor`/`next_cursor`** 对齐，翻页以工具结果 `_meta.next_call` 为准。若图片拉取出现 502，请将腾讯 CDN 域名（如 `photo.store.qq.com`、`qpic.cn`、`qzonestyle.gtimg.cn`）设为代理 **DIRECT**，详见 [docs/SERVER_DEBUG.md](docs/SERVER_DEBUG.md)。
 
 ---
 
