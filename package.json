@@ -14,7 +14,8 @@
     "test:all": "tsx test/run-all.ts --api",
     "typecheck": "tsc --noEmit",
     "verify": "tsx scripts/verify-endpoints.ts",
-    "verify:readonly": "tsx scripts/verify-endpoints.ts --skip-write"
+    "verify:readonly": "tsx scripts/verify-endpoints.ts --skip-write",
+    "verify:http": "tsx scripts/verify-bridge-http.ts"
   },
   "dependencies": {
     "axios": "^1.7.9",

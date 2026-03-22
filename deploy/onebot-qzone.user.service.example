@@ -1,0 +1,17 @@
+# 复制到 ~/.config/systemd/user/onebot-qzone.service 后: systemctl --user daemon-reload
+[Unit]
+Description=OneBot-QZone bridge (QQ 空间桥接)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/path/to/onebot-qzone
+Environment=ONEBOT_PORT=5700
+# 避免改了 src 却忘 build、仍跑旧 dist
+ExecStartPre=/usr/bin/npm run build
+ExecStart=/usr/bin/node dist/main.js
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
