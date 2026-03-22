@@ -182,7 +182,10 @@ async function main(): Promise<void> {
   network.start();
   poller.start();
   log('INFO',
-    `事件监听: 说说=${config.emitMessageEvents} 评论=${config.emitCommentEvents} 点赞=${config.emitLikeEvents} 好友动态=${config.emitFriendFeedEvents} | 轮询源=${config.eventPollSource || 'auto'} 间隔=${config.pollInterval}s`,
+    `事件监听: 说说=${config.emitMessageEvents} 评论=${config.emitCommentEvents} 点赞=${config.emitLikeEvents} 好友动态=${config.emitFriendFeedEvents} 心跳=${config.emitHeartbeatEvents} | 轮询源=${config.eventPollSource || 'auto'} 间隔=${config.pollInterval}s`,
+  );
+  log('INFO',
+    `EventHub 事件订阅回调数=${hub.subscriberCount()}（每个开启 event 的 WS 路径各 1 + 反向 WS/HTTP 等）；排查重复推送可设 ONEBOT_EVENT_DEBUG=1 看 [push] 指纹`,
   );
 
   // Graceful shutdown

@@ -16,6 +16,7 @@ const cases: TestCase[] = [
       assert(typeof cfg.cachePath === 'string', 'cachePath');
       assert(typeof cfg.pollInterval === 'number', 'pollInterval');
       assert(typeof cfg.emitMessageEvents === 'boolean', 'emitMessageEvents');
+      assert(typeof cfg.emitHeartbeatEvents === 'boolean', 'emitHeartbeatEvents');
     },
   },
   {
