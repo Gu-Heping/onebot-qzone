@@ -53,7 +53,13 @@ export function stripHtml(s: string): string {
 }
 
 /** QZone CDN 图片 host 白名单（与 actions.isQzoneImageUrl 一致，避免循环依赖） */
-const QZONE_IMAGE_HOST_SUFFIXES = ['qpic.cn', 'photo.store.qq.com', 'qzonestyle.gtimg.cn'];
+const QZONE_IMAGE_HOST_SUFFIXES = [
+  'qpic.cn',
+  'photo.store.qq.com',
+  'qlogo1.store.qq.com',
+  'qlogo2.store.qq.com',
+  'qzonestyle.gtimg.cn',
+];
 
 function isQzoneImageUrl(rawUrl: string): boolean {
   try {
