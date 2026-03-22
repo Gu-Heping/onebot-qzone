@@ -979,6 +979,10 @@ export class EventPoller {
     } catch { /* qz_opcnt2 also failed, skip */ }
   }
 
+  /**
+   * 仅收缩「仍在轮询评论/点赞」的 tid 集合；**不得**删除 seenCommentIds / seenLikeUins。
+   * 否则旧帖暂时掉出最近 N 条后再进入列表时，会丢失已见评论/点赞，他人评论也会被当成全新 → 重复推送。
+   */
   private _pruneTrackingDicts(recentTids: string[], max = 100): void {
     if (this.trackTids.size <= max) return;
     const toKeep = new Set<string>([...recentTids]);
@@ -990,8 +994,6 @@ export class EventPoller {
       if (!toKeep.has(tid)) {
         this.trackTids.delete(tid);
         this.commentWarmTids.delete(tid);
-        this.seenCommentIds.delete(tid);
-        this.seenLikeUins.delete(tid);
         this.pendingLikeUsers.delete(tid);
         this.knownCounts.delete(tid);
       }

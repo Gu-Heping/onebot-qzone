@@ -63,17 +63,19 @@ function getEventFingerprint(event: OneBotEvent): string | null {
 
   const noticeType = String(record['notice_type'] ?? '');
   if (noticeType === 'qzone_comment') {
-    const postTid = String(record['post_tid'] ?? '');
-    const commentId = String(record['comment_id'] ?? '');
+    const postTid = String(record['post_tid'] ?? '').trim();
+    const commentId = String(record['comment_id'] ?? '').trim();
     if (!postTid || !commentId) return null;
-    return `comment:${record['self_id'] ?? ''}:${postTid}:${commentId}`;
+    const sid = String(record['self_id'] ?? '').trim();
+    return `comment:${sid}:${postTid}:${commentId}`;
   }
 
   if (noticeType === 'qzone_like') {
-    const postTid = String(record['post_tid'] ?? '');
-    const userId = String(record['user_id'] ?? '');
+    const postTid = String(record['post_tid'] ?? '').trim();
+    const userId = String(record['user_id'] ?? '').trim();
     if (!postTid || !userId) return null;
-    return `like:${record['self_id'] ?? ''}:${postTid}:${userId}`;
+    const sid = String(record['self_id'] ?? '').trim();
+    return `like:${sid}:${postTid}:${userId}`;
   }
 
   return null;
