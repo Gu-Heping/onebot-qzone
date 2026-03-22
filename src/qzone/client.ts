@@ -3076,24 +3076,79 @@ export class QzoneClient {
   }
 
   /**
-   * 从 Cookie 中提取昵称（ptnick_xxx 字段，值为 hex 编码的 UTF-8 字符串）。
-   * 如 Cookie 中无此字段，返回空字符串。
+   * 从 Cookie 中提取昵称（ptnick_qq 字段，值为 hex 编码的 UTF-8 或 URL 编码）。
+   * 仅粘贴 p_skey 等、未带 ptnick 时多为空。
    */
-  getNicknameFromCookie(): string {
-    if (!this.qqNumber) return '';
-    const raw = this.cookies[`ptnick_${this.qqNumber}`];
+  getNicknameFromCookieForUin(uin: string): string {
+    if (!uin) return '';
+    const raw = this.cookies[`ptnick_${uin}`];
     if (!raw) return '';
     try {
-      // ptnick 值可能是 hex 编码的 UTF-8
       if (/^[0-9a-fA-F]+$/.test(raw) && raw.length % 2 === 0) {
         const bytes = Buffer.from(raw, 'hex');
         return bytes.toString('utf8');
       }
-      // 也可能是 URL 编码
       return decodeURIComponent(raw);
     } catch {
       return raw;
     }
+  }
+
+  getNicknameFromCookie(): string {
+    return this.qqNumber ? this.getNicknameFromCookieForUin(this.qqNumber) : '';
+  }
+
+  /**
+   * 从 cgi_personal_card（getUserInfo）JSON 中抽取展示昵称；字段随腾讯改版可能变化，做多键兜底。
+   */
+  extractNicknameFromPersonalCard(p: unknown): string {
+    const tryObj = (obj: Record<string, unknown> | null | undefined, keys: string[]): string => {
+      if (!obj) return '';
+      for (const k of keys) {
+        const v = obj[k];
+        if (typeof v === 'string' && v.trim()) return v.trim();
+      }
+      return '';
+    };
+    if (!p || typeof p !== 'object') return '';
+    const o = p as Record<string, unknown>;
+    let s = tryObj(o, ['nickname', 'nick', 'user_name', 'username', 'userName']);
+    if (s) return s;
+    const data = o['data'];
+    if (data && typeof data === 'object' && !Array.isArray(data)) {
+      const d = data as Record<string, unknown>;
+      s = tryObj(d, ['nickname', 'nick', 'user_name', 'username', 'userName']);
+      if (s) return s;
+      const user = d['user'];
+      if (user && typeof user === 'object' && !Array.isArray(user)) {
+        s = tryObj(user as Record<string, unknown>, ['nickname', 'nick']);
+        if (s) return s;
+      }
+    }
+    return '';
+  }
+
+  /**
+   * 供 get_login_info 等使用：与 NapCat 的 QQ 资料**无关**，仅走空间侧 Cookie / 接口。
+   * 顺序：ptnick → cgi_get_portrait → cgi_personal_card。
+   */
+  async resolveLoginNickname(uin: string): Promise<string> {
+    const fromCookie = this.getNicknameFromCookieForUin(uin).trim();
+    if (fromCookie) return fromCookie;
+    try {
+      const portrait = await this.getPortrait(uin);
+      if (portrait.nickname.trim()) return portrait.nickname.trim();
+    } catch {
+      /* ignore */
+    }
+    try {
+      const card = await this.getUserInfo(uin);
+      const n = this.extractNicknameFromPersonalCard(card).trim();
+      if (n) return n;
+    } catch {
+      /* ignore */
+    }
+    return '';
   }
 
   // ──────────────────────────────────────────────

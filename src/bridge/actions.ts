@@ -180,14 +180,9 @@ export class ActionHandler {
   // ── meta ────────────────────────────────────
   async action_get_login_info(_p: Record<string, unknown>, echo?: string): Promise<OneBotResponse> {
     if (!this.client.loggedIn) return fail(1401, '未登录', echo);
-    let nickname = this.client.getNicknameFromCookie();
-    if (!nickname) {
-      try {
-        const portrait = await this.client.getPortrait(this.client.qqNumber!);
-        nickname = portrait.nickname;
-      } catch { /* ignore */ }
-    }
-    return ok({ user_id: safeInt(this.client.qqNumber!), nickname: nickname || 'QZone用户' }, echo);
+    const uin = this.client.qqNumber!;
+    const nickname = (await this.client.resolveLoginNickname(uin)) || 'QZone用户';
+    return ok({ user_id: safeInt(uin), nickname }, echo);
   }
 
   async action_get_status(_p: Record<string, unknown>, echo?: string): Promise<OneBotResponse> {
@@ -701,28 +696,18 @@ export class ActionHandler {
       return fail(1500, `QR 登录失败: ${e}`, echo);
     }
     if (!this.client.loggedIn) return fail(1500, 'QR 登录未完成', echo);
-    let nickname = this.client.getNicknameFromCookie();
-    if (!nickname) {
-      try {
-        const portrait = await this.client.getPortrait(this.client.qqNumber!);
-        nickname = portrait.nickname;
-      } catch { /* ignore */ }
-    }
-    return ok({ user_id: safeInt(this.client.qqNumber!), nickname: nickname || 'QZone用户' }, echo);
+    const uin = this.client.qqNumber!;
+    const nickname = (await this.client.resolveLoginNickname(uin)) || 'QZone用户';
+    return ok({ user_id: safeInt(uin), nickname }, echo);
   }
 
   async action_login_cookie(p: Record<string, unknown>, echo?: string): Promise<OneBotResponse> {
     const cookieStr = String(p['cookie'] ?? p['cookie_string'] ?? '');
     if (!cookieStr) return fail(1400, '缺少 cookie', echo);
     await this.client.loginWithCookieString(cookieStr);
-    let nickname = this.client.getNicknameFromCookie();
-    if (!nickname) {
-      try {
-        const portrait = await this.client.getPortrait(this.client.qqNumber!);
-        nickname = portrait.nickname;
-      } catch { /* ignore */ }
-    }
-    return ok({ user_id: safeInt(this.client.qqNumber!), nickname: nickname || 'QZone用户' }, echo);
+    const uin = this.client.qqNumber!;
+    const nickname = (await this.client.resolveLoginNickname(uin)) || 'QZone用户';
+    return ok({ user_id: safeInt(uin), nickname }, echo);
   }
 
   /** 更新 Cookie：传入与 login_cookie 相同格式的 cookie 字符串，覆盖当前会话并写回缓存/.env */
@@ -732,10 +717,11 @@ export class ActionHandler {
     try {
       await this.client.loginWithCookieString(cookieStr);
       this.client.syncCookieToEnvFile();
-      const nickname = this.client.getNicknameFromCookie() || 'QZone用户';
+      const uin = this.client.qqNumber!;
+      const nickname = (await this.client.resolveLoginNickname(uin)) || 'QZone用户';
       return ok({
         message: 'Cookie 已更新',
-        user_id: safeInt(this.client.qqNumber!),
+        user_id: safeInt(uin),
         nickname,
       }, echo);
     } catch (e) {
