@@ -7,7 +7,7 @@ import {
   seenLookupKeysForPost,
 } from './stablePostKey.js';
 import { safeInt } from './utils.js';
-import { htmlUnescape } from '../qzone/utils.js';
+import { htmlUnescape, log } from '../qzone/utils.js';
 import { processEmojis, parseEmojis, type EmojiConvertOptions } from '../qzone/emoji.js';
 import { env } from '../qzone/config/env.js';
 import { AuthError, isQzoneError } from '../qzone/infra/errors.js';
@@ -479,7 +479,7 @@ export class EventPoller {
   ) {}
 
   private logEventDebug(msg: string): void {
-    if (this.config.eventDebug) console.log(msg);
+    if (this.config.eventDebug) log('DEBUG', msg);
   }
 
   private get seenTidsFile(): string {
@@ -776,7 +776,7 @@ export class EventPoller {
         this.flushSeenTidsImmediate();
         this.logEventDebug(`[Poller:DEBUG] publish done, subscribers=${this.hub.subscriberCount()}`);
         if (this.config.eventDebug) {
-          console.log(`[push][seen] myPosts keys=${seenLookupKeysForPost(item, r).join(',')}`);
+          log('INFO', `[push][seen] myPosts keys=${seenLookupKeysForPost(item, r).join(',')}`);
         }
       }
     }
@@ -794,6 +794,13 @@ export class EventPoller {
         const item = normalizeEmotion(r, selfId);
         if (!item.tid || !item.uin) continue;
         this.cacheNormalizedItem(item);
+        // 好友流常混入当前用户自己的动态；已与 pollMyPosts 重复，双开时会推两次
+        if (this.config.emitMessageEvents && item.uin === selfId) {
+          this.logEventDebug(
+            `[Poller:DEBUG] friendFeeds skip own uin=tid ${item.tid?.slice(0, 20)} (pollMyPosts 已管)`,
+          );
+          continue;
+        }
         if (this.isPostSeenItem(item, r)) continue;
         const sk = buildStablePostKeyFromItem(item) || buildStablePostKey(r);
         const event = await buildPostEvent(item, selfId, {
@@ -810,7 +817,7 @@ export class EventPoller {
         this.markSeenPostItem(item, r);
         this.flushSeenTidsImmediate();
         if (this.config.eventDebug) {
-          console.log(`[push][seen] friendFeeds keys=${seenLookupKeysForPost(item, r).join(',')}`);
+          log('INFO', `[push][seen] friendFeeds keys=${seenLookupKeysForPost(item, r).join(',')}`);
         }
       }
     } catch { /* skip */ }
@@ -977,7 +984,7 @@ export class EventPoller {
   }
 
   private emitHeartbeat(): void {
-    if (!this.running) return;
+    if (!this.running || !this.config.emitHeartbeatEvents) return;
     const selfId = this.client.loggedIn ? safeInt(this.client.qqNumber!) : 0;
     const event = buildHeartbeatEvent(String(selfId), { online: this.statusOk, good: this.statusOk });
     this.hub.publish(event).catch(() => { /* ignore */ });

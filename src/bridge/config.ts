@@ -28,6 +28,8 @@ export interface BridgeConfig {
   emitCommentEvents: boolean;
   emitLikeEvents: boolean;
   emitFriendFeedEvents: boolean;
+  /** 是否经 Hub 下发 OneBot meta_event 心跳（默认 true；关后不再每 30s WS 广播，减少「一直在上报」观感） */
+  emitHeartbeatEvents: boolean;
   eventDebug: boolean;
   eventPollSource: 'pc' | 'mobile' | 'auto';
   /** 推送事件中是否附带图片 base64（默认 true，bot 无需再请求） */
@@ -66,6 +68,7 @@ export function fromEnv(): BridgeConfig {
     emitCommentEvents:        !['0', 'false', 'no'].includes((e['ONEBOT_EMIT_COMMENT_EVENTS'] ?? '1').toLowerCase()),
     emitLikeEvents:           !['0', 'false', 'no'].includes((e['ONEBOT_EMIT_LIKE_EVENTS'] ?? '1').toLowerCase()),
     emitFriendFeedEvents:     !['0', 'false', 'no'].includes((e['ONEBOT_EMIT_FRIEND_FEED_EVENTS'] ?? '0').toLowerCase()),
+    emitHeartbeatEvents:      !['0', 'false', 'no'].includes((e['ONEBOT_EMIT_HEARTBEAT_EVENTS'] ?? '1').toLowerCase()),
     eventDebug:               ['1', 'true', 'yes'].includes((e['ONEBOT_EVENT_DEBUG'] ?? '0').toLowerCase()),
     eventPollSource:          (['pc', 'mobile', 'auto'].includes(e['ONEBOT_EVENT_POLL_SOURCE'] ?? '')
                                 ? e['ONEBOT_EVENT_POLL_SOURCE'] as 'pc' | 'mobile' | 'auto'
