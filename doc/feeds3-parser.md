@@ -44,7 +44,7 @@ OpenClaw 侧工具行为与运维重启顺序见 **[`openclaw-acceptance.md`](op
 |--------|------|
 | `preprocess.ts` | HTML 预处理 |
 | `content.ts` | 表情/标签/正文文本清理 |
-| `items.ts` | `parseFeeds3Items` 说说列表 |
+| `items.ts` | `parseFeeds3Items` 说说列表；`data-uin` 已与 `filterUin` 对齐时**不再**因缺少可配对的 `id="feed_*"` 外层块而整条丢弃（避免新模板下「多页 HTML 只解析出一条」） |
 | `comments.ts` | `parseFeeds3Comments`、`parseFeeds3CommentsScoped`、`Feeds3Comment`（含多级与评论内图片 pic） |
 | `feedDataCanonical.ts` | `canonicalPostTidFromFeedAttrs`：feed_data 与 items/评论/meta/点赞共用的 tid 归一 |
 | `likes.ts` | `parseFeeds3Likes` 点赞（被动赞卡片 tid 与 canonical 对齐） |
