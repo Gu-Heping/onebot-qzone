@@ -71,6 +71,51 @@ function formatTimestampToReadable(ts: number): string {
   return `${year}-${month}-${day} ${hour}:${minute}`;
 }
 
+/**
+ * 好友动态里「本条」发表者在 feed_data 上方的最后一个 `f-nick` 内（`link="nameCard_uin"`）。
+ * 若用全文第一个 `class="f-name"`，会先命中正文里的 `f-name info`（播放量/点赞等）或错位到其它区域，导致昵称与 uin 和真实发表者不一致。
+ */
+function parseFeeds3FeedAuthorFromBefore(searchBefore: string): { uin: string; nickname: string } | null {
+  const blocks = [...searchBefore.matchAll(/<div\b[^>]*\bf-nick\b[^>]*>([\s\S]*?)<\/div>/gi)];
+  if (blocks.length === 0) return null;
+  const inner = blocks[blocks.length - 1]![1]!;
+  const cardM = inner.match(/\blink\s*=\s*["']nameCard_(\d+)/i);
+  if (!cardM?.[1]) return null;
+  const nickM = inner.match(/<a\b[^>]*\bf-name\b[^>]*>([\s\S]*?)<\/a>/i);
+  const nickname = nickM
+    ? nickM[1]!.replace(/<[^>]+>/g, '').replace(/&nbsp;/gi, ' ').replace(/\s+/g, ' ').trim()
+    : '';
+  return { uin: cardM[1]!, nickname };
+}
+
+/**
+ * 本条动态正文区（txt-box-title / 前段 txt-box）里出现的 nameCard_uin。
+ * 当它与 feed_data 的 data-uin **一致**时，视为**本条说说的发表者**（空间在 feed_data 上标的主人）。
+ * 混流里 feed_data 上方的 f-nick 有时是**另一位用户**（互动入口、上一条卡片残留等），与正文作者不是同一人，不能单靠 f-nick 定本条 uin。
+ */
+function parseAuthorFromTxtBoxNameCard(searchAfter: string): { uin: string; nickname: string } | null {
+  const idx = searchAfter.search(/class="[^"]*txt-box-title[^"]*"/i);
+  const head = idx >= 0 ? searchAfter.slice(idx, idx + 2800) : searchAfter.slice(0, Math.min(3200, searchAfter.length));
+  const uinM = head.match(/\blink\s*=\s*["']nameCard_(\d+)/i);
+  if (!uinM?.[1]) return null;
+  const nickM = head.match(/<a[^>]*class="[^"]*nickname[^"]*"[^>]*>([\s\S]*?)<\/a>/i);
+  const nickname = nickM
+    ? nickM[1]!.replace(/<[^>]+>/g, '').replace(/&nbsp;/gi, ' ').replace(/\s+/g, ' ').trim()
+    : '';
+  return { uin: uinM[1]!, nickname };
+}
+
+/**
+ * `searchAfter` 从当前条的 `name="feed_data"` 起算；不能用 indexOf 从 0 找否则会命中自身，截出空串。
+ * 返回「本条」片段：从开头到下一条 `name="feed_data"`（不含），若无下一条则全文。
+ */
+function sliceSearchAfterCurrentFeedOnly(searchAfter: string): string {
+  const tagEnd = searchAfter.indexOf('>');
+  if (tagEnd < 0) return searchAfter;
+  const nextFd = searchAfter.indexOf('name="feed_data"', tagEnd + 1);
+  return nextFd < 0 ? searchAfter : searchAfter.slice(0, nextFd);
+}
+
 /** 多重正则匹配器：尝试多个模式直到成功 */
 function tryMultiplePatterns<T>(
   text: string,
@@ -195,12 +240,19 @@ export function parseFeeds3Items(
     const searchAfter = processedText.substring(fdPos, afterEnd);
     const searchBefore = processedText.substring(beforeStart, fdPos);
 
+    const nickBlockAuthor = parseFeeds3FeedAuthorFromBefore(searchBefore);
+    let posterUin =
+      nickBlockAuthor?.uin && /^\d+$/.test(nickBlockAuthor.uin) ? nickBlockAuthor.uin : dataUin;
+
+    const tagEndForLog = searchAfter.indexOf('>');
+    const nextFeedDataInsideAfter =
+      tagEndForLog >= 0 ? searchAfter.indexOf('name="feed_data"', tagEndForLog + 1) : -1;
     debugIngest('search range', {
       tid,
       nextFdPos: nextFdPos >= 0 ? nextFdPos : -1,
       afterEndOffset: afterEnd - fdPos,
       searchAfterLen: searchAfter.length,
-      nextFeedDataInAfter: searchAfter.indexOf('name="feed_data"'),
+      nextFeedDataInsideAfter,
     }, 'H2');
 
     let content = '';
@@ -325,6 +377,19 @@ export function parseFeeds3Items(
       const nm = searchRegion.match(nicknamePat);
       if (nm) nickname = nm[1]!.replace(/<[^>]+>/g, '').trim();
     }
+    if (nickBlockAuthor?.nickname) {
+      nickname = nickBlockAuthor.nickname;
+    }
+
+    const txtBoxNameCardAuthor = parseAuthorFromTxtBoxNameCard(searchAfter);
+    if (
+      txtBoxNameCardAuthor &&
+      /^\d+$/.test(dataUin) &&
+      txtBoxNameCardAuthor.uin === dataUin
+    ) {
+      posterUin = dataUin;
+      if (txtBoxNameCardAuthor.nickname) nickname = txtBoxNameCardAuthor.nickname;
+    }
 
     if (!content && matchedBlock?.block) {
       const block = matchedBlock.block;
@@ -378,6 +443,11 @@ export function parseFeeds3Items(
       const commentItems = block.match(/<li\s+class="comments-item/gi);
       if (commentItems) cmtnum = commentItems.length;
     }
+    if (cmtnum === 0) {
+      const cmtRegion = sliceSearchAfterCurrentFeedOnly(searchAfter);
+      const commentItemsInAfter = cmtRegion.match(/<li\s+class="comments-item/gi);
+      if (commentItemsInAfter) cmtnum = commentItemsInAfter.length;
+    }
 
     let likenum = 0;
     if (matchedBlock?.block) {
@@ -413,8 +483,7 @@ export function parseFeeds3Items(
 
     const fullRegion = searchBefore + searchAfter;
     const regionDecoded = htmlUnescape(fullRegion);
-    const nextFeedDataInAfter = searchAfter.indexOf('name="feed_data"');
-    const searchAfterCurrentOnly = nextFeedDataInAfter >= 0 ? searchAfter.substring(0, nextFeedDataInAfter) : searchAfter;
+    const searchAfterCurrentOnly = sliceSearchAfterCurrentFeedOnly(searchAfter);
     const regionCurrentFeedOnly = searchBefore + searchAfterCurrentOnly;
     const regionCurrentDecoded = htmlUnescape(regionCurrentFeedOnly);
 
@@ -636,10 +705,10 @@ export function parseFeeds3Items(
         ?? searchAll.match(/curkey\s*[:=]\s*['"]([^'"]+)['"]/i);
       if (ckM) likeCurkey = ckM[1]!;
 
-      if (!likeCurkey && dataUin && abstime) {
+      if (!likeCurkey && posterUin && abstime) {
         const ts = abstime || (matchedBlock?.timestamp ?? 0);
         if (ts) {
-          likeCurkey = '00' + dataUin.padStart(10, '0') + '00' + String(ts).padStart(10, '0');
+          likeCurkey = '00' + posterUin.padStart(10, '0') + '00' + String(ts).padStart(10, '0');
           log('DEBUG', `parseFeeds3Items: curkey calculated from formula: ${likeCurkey}`);
         }
       }
@@ -680,7 +749,7 @@ export function parseFeeds3Items(
     }, 'IMG');
     debugIngest('item summary', {
       tid,
-      uin: dataUin,
+      uin: posterUin,
       contentLen: content.length,
       contentSnippet: content.slice(0, 60),
       imagesRaw: images.length,
@@ -711,7 +780,11 @@ export function parseFeeds3Items(
     const isLiked = /data-islike="1"/.test(searchAfter) || /qz_like_btn[^"]*item-on|item-on[^"]*qz_like_btn/.test(searchAfter);
 
     const item: Record<string, unknown> = {
-      tid: canonicalTid, uin: dataUin, nickname, content,
+      tid: canonicalTid,
+      uin: posterUin,
+      opuin: posterUin,
+      nickname,
+      content,
       created_time: timestamp, createTime: formatTimestampToReadable(timestamp), createTime2: formatTimestampToReadable(timestamp),
       cmtnum, likenum, fwdnum: isForward ? 1 : 0,
       pic: filteredImages.map(u => ({ url: u })),

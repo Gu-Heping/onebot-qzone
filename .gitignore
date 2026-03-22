@@ -4,6 +4,8 @@ dist/
 
 # Cache / Runtime
 cache/
+.cache_deep/
+.cache_test/
 test_cache/
 test_cache_real/
 logs/

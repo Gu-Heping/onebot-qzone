@@ -17,9 +17,14 @@ export function preprocessHtml(text: string): {
   // 1. 统一换行符
   let processed = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
 
-  // 2. 处理常见 HTML 实体（除了 htmlUnescape 已处理的）
-  processed = processed.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>');
-  replacements += (text.match(/&amp;|&lt;|&gt;/g) || []).length;
+  // 2. 常见实体与不间断空格（feeds3 正文里 &nbsp; 极常见）
+  processed = processed
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/\u00a0/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>');
+  replacements += (text.match(/&amp;|&lt;|&gt;|&nbsp;|\u00a0/gi) || []).length;
 
   // 3. 清理多余的空白字符（保留结构需要的）
   processed = processed.replace(/>\s+</g, '><');

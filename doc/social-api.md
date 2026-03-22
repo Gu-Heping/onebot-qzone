@@ -1,5 +1,7 @@
 # 社交互动接口
 
+> **实机探测（2026-03-22）**：`mobile.qzone.qq.com` 的 `/like`、`/get_comment_list` 等为 **HTTP 404**；PC 端 `get_like_list` 本次为 **500 空体**；`emotion_cgi_getcmtreply_v6` 最小 GET 为 **`code=-3` 参数错误**。当前仓库内评论与点赞列表以 **feeds3 HTML 解析** 为主，请勿把下文移动端 URL 当作可靠 fallback。详见 [`api-probe-results.md`](api-probe-results.md)。
+
 ## 1. 点赞说说
 
 ### feeds3 HTML 点赞详情解析

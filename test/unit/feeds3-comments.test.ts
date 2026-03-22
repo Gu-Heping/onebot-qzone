@@ -3,7 +3,8 @@
  * 验证一级评论和二级回复的正确解析
  */
 
-import { parseFeeds3Comments } from '../../src/qzone/feeds3Parser.js';
+import { parseFeeds3Comments, parseFeeds3CommentsScoped } from '../../src/qzone/feeds3Parser.js';
+import { preprocessHtml } from '../../src/qzone/feeds3/preprocess.js';
 import { assert, runSuite, type TestCase } from '../test-helpers.js';
 
 const cases: TestCase[] = [
@@ -311,6 +312,118 @@ const cases: TestCase[] = [
       assert(Array.isArray(pic) && pic.length >= 1, `评论应包含 pic 数组且至少 1 条，实际: ${JSON.stringify(pic)}`);
       const hasQpic = pic.some((u: string) => u.includes('a1.qpic.cn') && u.includes('V11MnySM1E9aLp'));
       assert(hasQpic, `pic 中应包含 a1.qpic.cn 的 URL，实际: ${pic.join(', ')}`);
+    },
+  },
+  {
+    name: '纯图评论：data-pickey 第二段为 http 时应写入 pic（无文字）',
+    fn: () => {
+      const storeUrl = 'https://photo.store.qq.com/psc?/V11test/abc!/m&ek=1&kp=1';
+      const html = `
+<div class="comments-list">
+  <ul>
+    <li class="comments-item bor3" data-type="commentroot" data-tid="9" data-uin="2967010345" data-nick="picuser" data-who="1">
+      <div class="comments-item-bd">
+        <div class="comments-content">
+          <a class="nickname c_tx q_namecard">picuser</a>&nbsp;:&nbsp;
+          <a class="img-item" data-pickey="21a695943a1cbe6940570900,${storeUrl}"></a>
+        </div>
+        <div class="comments-op">
+          <span class="state">14:21</span>
+          <a class="reply" data-param="t1_tid=cded9d7ec5e9b76915ea0500&t1_uin=2124279245">回复</a>
+        </div>
+      </div>
+    </li>
+  </ul>
+</div>
+`;
+      const result = parseFeeds3Comments(html);
+      assert(result.size > 0, '应该解析出帖子');
+      const comments = result.get('cded9d7ec5e9b76915ea0500') ?? result.values().next().value!;
+      const c = comments.find((x: Record<string, unknown>) => x['commentid'] === '9');
+      assert(c !== undefined, '应找到 commentid=9');
+      assert(String(c!['content']).trim() === '', `纯图评论 content 应为空，实际: ${JSON.stringify(c!['content'])}`);
+      const pic = c!['pic'] as string[] | undefined;
+      assert(Array.isArray(pic) && pic.includes(storeUrl), `pic 应含 photo.store URL，实际: ${JSON.stringify(pic)}`);
+    },
+  },
+  {
+    name: 'style 内 background-image 的 qpic 应写入 pic（无 thumbnails）',
+    fn: () => {
+      const picUrl = 'https://b2.qpic.cn/psc?/V99test/xyz!/m';
+      const html = `
+<div class="comments-list">
+  <ul>
+    <li class="comments-item bor3" data-type="commentroot" data-tid="8" data-uin="111" data-nick="背景图" data-who="1">
+      <div class="comments-item-bd">
+        <div class="comments-content">
+          <a class="nickname c_tx q_namecard">背景图</a>&nbsp;:&nbsp;
+          <div class="img-bubble" style="background-image:url(${picUrl})"></div>
+        </div>
+        <div class="comments-op">
+          <a class="reply" data-param="t1_tid=cded9d7ec5e9b76915ea0500&t1_uin=2124279245">回复</a>
+        </div>
+      </div>
+    </li>
+  </ul>
+</div>
+`;
+      const result = parseFeeds3Comments(html);
+      const comments = result.get('cded9d7ec5e9b76915ea0500') ?? result.values().next().value!;
+      const c = comments.find((x: Record<string, unknown>) => x['commentid'] === '8');
+      assert(c !== undefined, '应找到 commentid=8');
+      const pic = c!['pic'] as string[] | undefined;
+      assert(Array.isArray(pic) && pic.some((u) => u.includes('b2.qpic.cn')), `pic 应含 background 内 URL，实际: ${JSON.stringify(pic)}`);
+    },
+  },
+  {
+    name: '含两条 feed_data 时评论应按说说 tid 分桶（不合并到同一 t1_tid）',
+    fn: () => {
+      const tid1 = 'hexfeedaaa111';
+      const tid2 = 'hexfeedbbb222';
+      const html = `
+<i name="feed_data" data-tid="${tid1}" data-uin="2849419010" data-abstime="1700000001" data-fkey="${tid1}">
+<div class="f-single">说说A</div>
+<div class="comments-list">
+  <ul>
+    <li class="comments-item bor3" data-type="commentroot" data-tid="1" data-uin="111" data-nick="甲">
+      <div class="comments-item-bd">
+        <div class="comments-content"><a class="nickname">甲</a>&nbsp;:&nbsp;评论A</div>
+        <div class="comments-op">
+          <a class="reply" data-param="t1_tid=wrongbucket&t1_uin=1">回复</a>
+        </div>
+      </div>
+    </li>
+  </ul>
+</div>
+</i>
+<i name="feed_data" data-tid="${tid2}" data-uin="2849419010" data-abstime="1700000002" data-fkey="${tid2}">
+<div class="f-single">说说B</div>
+<div class="comments-list">
+  <ul>
+    <li class="comments-item bor3" data-type="commentroot" data-tid="1" data-uin="222" data-nick="乙">
+      <div class="comments-item-bd">
+        <div class="comments-content"><a class="nickname">乙</a>&nbsp;:&nbsp;评论B</div>
+        <div class="comments-op">
+          <a class="reply" data-param="t1_tid=wrongbucket&t1_uin=1">回复</a>
+        </div>
+      </div>
+    </li>
+  </ul>
+</div>
+</i>
+`;
+      const { text: processed } = preprocessHtml(html);
+      const scoped = parseFeeds3CommentsScoped(processed);
+      assert(scoped.size === 2, `应有 2 个 tid 桶，实际: ${scoped.size}`);
+      const a = scoped.get(tid1);
+      const b = scoped.get(tid2);
+      assert(a !== undefined && a.length === 1 && String(a[0]!['content']) === '评论A', '第一条应归入 tid1');
+      assert(b !== undefined && b.length === 1 && String(b[0]!['content']) === '评论B', '第二条应归入 tid2');
+
+      const viaMain = parseFeeds3Comments(html);
+      assert(viaMain.size === 2, `parseFeeds3Comments 应走 scoped 并得到 2 桶，实际: ${viaMain.size}`);
+      assert(String(viaMain.get(tid1)?.[0]?.['content']) === '评论A', '主入口 tid1');
+      assert(String(viaMain.get(tid2)?.[0]?.['content']) === '评论B', '主入口 tid2');
     },
   },
 ];
