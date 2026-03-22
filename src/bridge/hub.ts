@@ -1,4 +1,5 @@
 import type { OneBotEvent } from '../qzone/types.js';
+import { log } from '../qzone/utils.js';
 
 export type EventCallback = (event: OneBotEvent) => void | Promise<void>;
 
@@ -9,25 +10,53 @@ const EVENT_DEDUP_MAX = 1000;
 
 export type EventHubOptions = { eventDebug?: boolean };
 
+function readSenderUserId(record: Record<string, unknown>): string {
+  const sender = record['sender'];
+  if (sender && typeof sender === 'object' && !Array.isArray(sender)) {
+    const uid = (sender as Record<string, unknown>)['user_id'];
+    if (uid != null && String(uid).trim() !== '') return String(uid).trim();
+  }
+  return '';
+}
+
+/**
+ * 统一「说说」类事件的指纹：尽量用 `作者uin:tid`，避免同一帖在
+ * 「带 _stable_post_key」与「仅有 _tid」两种载荷下生成不同指纹 → Hub 去重失效、重复推送。
+ */
+function getMessageEventFingerprint(record: Record<string, unknown>): string | null {
+  const selfId = String(record['self_id'] ?? '');
+
+  let author = '';
+  let tid = '';
+  const stable = String(record['_stable_post_key'] ?? '').trim();
+  if (stable) {
+    const colon = stable.indexOf(':');
+    if (colon > 0) {
+      author = stable.slice(0, colon).trim();
+      tid = stable.slice(colon + 1).trim();
+    }
+  }
+  if (!tid) tid = String(record['_tid'] ?? '').trim();
+  if (!author) {
+    author = String(record['_author_uin'] ?? record['_uin'] ?? '').trim();
+  }
+  if (!author) author = readSenderUserId(record);
+
+  if (author && tid) {
+    return `message:${selfId}:${author}:${tid}`;
+  }
+
+  const tidOnly = tid || String(record['_tid'] ?? record['message_id'] ?? '').trim();
+  if (!tidOnly) return null;
+  return `message:${selfId}:${tidOnly}`;
+}
+
 function getEventFingerprint(event: OneBotEvent): string | null {
   const record = event as Record<string, unknown>;
   const postType = String(record['post_type'] ?? '');
 
   if (postType === 'message') {
-    const stable = String(record['_stable_post_key'] ?? '').trim();
-    if (stable) {
-      const colon = stable.indexOf(':');
-      if (colon > 0) {
-        const authorUin = stable.slice(0, colon);
-        const stableTid = stable.slice(colon + 1);
-        if (stableTid) {
-          return `message:${record['self_id'] ?? ''}:${authorUin}:${stableTid}`;
-        }
-      }
-    }
-    const tid = String(record['_tid'] ?? record['message_id'] ?? '');
-    if (!tid) return null;
-    return `message:${record['self_id'] ?? ''}:${tid}`;
+    return getMessageEventFingerprint(record);
   }
 
   if (postType !== 'notice') return null;
@@ -72,10 +101,10 @@ export class EventHub {
   async publish(event: OneBotEvent): Promise<boolean> {
     const fp = getEventFingerprint(event);
     if (this.isDuplicateEvent(event)) {
-      if (this.eventDebug && fp) console.log(`[push][dedupe] ${fp}`);
+      if (this.eventDebug && fp) log('INFO', `[push][dedupe] ${fp}`);
       return false;
     }
-    if (this.eventDebug && fp) console.log(`[push][publish] ${fp}`);
+    if (this.eventDebug && fp) log('INFO', `[push][publish] ${fp}`);
     for (const cb of this.subscribers) {
       try {
         await cb(event);
