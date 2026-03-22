@@ -56,6 +56,8 @@ QQ空间 → OneBot v11 协议桥接服务（TypeScript 原生实现）。
 - **统一请求层**：JSONP 自动拆包、反爬检测（9 种模式）、auth 失败码集合 `{-3, -100, -3000, -10001, -10006}`、限流码集合 `{-10000, -2}`
 - **原始响应日志**：校验失败或反爬触发时自动写入 `logs/raw_responses/`，单文件上限 5 MB，目录自动裁剪至 500 文件
 - **端点健康检查**：`npm run verify:readonly` 一键验证 8 个读接口可用性
+- **HTTP 桥接抽检**：`npm run verify:http`（需 bridge 已启动）校验 `get_login_info` / `check_cookie` / `get_stranger_info` 等与昵称一致性
+- **全量工具对齐**：`npm run verify:tools` 按 OpenClaw `qzone_*` 对应 action 逐项请求；`--write` 会发临时说说并删除、对样本 tid 点赞再取消
 
 ### 好友列表与 `friends.json`
 
@@ -332,6 +334,8 @@ npm run test:all         # 全量测试
 npm run typecheck        # TypeScript 类型检查
 npm run verify           # 端点健康检查（读 + 写）
 npm run verify:readonly  # 端点健康检查（仅读接口）
+npm run verify:http      # 对已启动 bridge 做 HTTP 登录/昵称抽检
+npm run verify:tools     # HTTP 对齐全部 qzone 工具对应 action（可加 --write）
 ```
 
 ### 测试说明
@@ -339,6 +343,7 @@ npm run verify:readonly  # 端点健康检查（仅读接口）
 - **单元测试**：`test/unit/` 下 10 个测试套件，共 127 项，纯本地运行不需要登录。
 - **API 测试**：需先启动 bridge 并登录，`--readonly` 模式仅验证读接口。
 - **端点健康检查**：`scripts/verify-endpoints.ts`，启动即检验 8 个读 + 2 个写端点，输出彩色 PASS/FAIL/SKIP 报告。
+- **HTTP 全量工具**：`scripts/verify-all-qzone-tools-http.ts`（`verify:tools`），对 `127.0.0.1:ONEBOT_PORT` 真实 POST；`fetch_image` 白名单含 `qlogo*.store.qq.com` 等与头像 URL 一致。
 - **真实数据回归**：`npx tsx test/verify-real-feeds.ts`（需配置 Cookie）会校验 getEmotionList/getFriendFeeds、归一化结果，并输出含图说说数、多级评论（一级/二级/有回复的帖子数）、含图评论数。
 
 ### 调试获取评论

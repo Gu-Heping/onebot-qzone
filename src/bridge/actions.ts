@@ -43,6 +43,8 @@ export function isSafeUrl(rawUrl: string): boolean {
 const QZONE_IMAGE_HOST_SUFFIXES = [
   'qpic.cn',
   'photo.store.qq.com',
+  'qlogo1.store.qq.com',
+  'qlogo2.store.qq.com',
   'qzonestyle.gtimg.cn',
 ];
 
@@ -626,7 +628,21 @@ export class ActionHandler {
     const uin = String(p['user_id'] ?? p['uin'] ?? '');
     if (!uin) return fail(1400, '缺少 user_id', echo);
     const data = await this.client.getPortrait(uin);
-    return ok(data, echo);
+    if (data.nickname || data.avatarUrl) return ok(data, echo);
+    // cgi_get_portrait 常返回空；与 get_stranger_info 一致，用个人资料卡补全
+    try {
+      const card = (await this.client.getUserInfo(uin)) as Record<string, unknown>;
+      const nickname = this.client.extractNicknameFromPersonalCard(card) || data.nickname;
+      const avatarUrl =
+        typeof card['avatarUrl'] === 'string' && card['avatarUrl'].trim()
+          ? String(card['avatarUrl'])
+          : typeof card['figureurl'] === 'string' && card['figureurl'].trim()
+            ? String(card['figureurl'])
+            : data.avatarUrl;
+      return ok({ nickname, avatarUrl }, echo);
+    } catch {
+      return ok(data, echo);
+    }
   }
 
   // ── albums ─────────────────────────────────────
