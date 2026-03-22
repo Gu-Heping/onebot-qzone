@@ -110,6 +110,8 @@ export function unescapeXHex(s: string): string {
 /** HTML unescape（&amp; &lt; &quot; 等） */
 export function htmlUnescape(s: string): string {
   return s
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/\u00a0/g, ' ')
     .replace(/&amp;/g, '&')
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')

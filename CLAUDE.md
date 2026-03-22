@@ -37,9 +37,10 @@ npx tsx test/unit/utils.test.ts
 The QZone API client with multi-level fallback strategies for reliability:
 
 - **`client.ts`** - `QzoneClient` class containing all QZone API methods. Key features:
-  - Multi-level fallback for rate-limited APIs (e.g., `getEmotionList` falls back from `emotion_cgi_msglist_v6` to `feeds3_html_more`)
-  - Three-tier comment fetching: feeds3 inline → emotionList inline → `getCommentsLite` POST
-  - Four-tier like fetching: PC detail → Mobile detail → feeds3 HTML → count-only
+  - **`getEmotionList` uses only `feeds3_html_more` + HTML parse** (PC `emotion_cgi_msglist_v6` is still rate-limited in the wild, e.g. `code=-10000`; see `doc/api-probe-results.md`).
+  - **Comments**: `getCommentsBestEffort` serves from **feeds3-parsed comment buckets** (not mobile/PC comment JSON APIs in normal flow).
+  - **Likes list**: `getLikeListBestEffort` is **feeds3-only** (PC `get_like_list` often empty/500 in probes).
+  - **Detail**: `getShuoshuoDetail` tries PC taotao POST/GET (often 500/empty), mobile detail (often 404), then **match from emotion list** (feeds3-sourced).
   - LRU caching for feeds3 data and post metadata
   - Circuit breaker protection (2 failures → 30min cooldown)
 
@@ -49,7 +50,7 @@ The QZone API client with multi-level fallback strategies for reliability:
   - Auth failure codes: `{-3, -100, -3000, -10001, -10006}`
   - Rate limit codes: `{-10000, -2}`
 
-- **feeds3 解析** - 实现位于 `src/qzone/feeds3/`，由 barrel 文件 `feeds3Parser.ts` 统一导出。子模块：`preprocess.ts`（HTML 预处理）、`content.ts`（正文/表情/标签清理）、`items.ts`（说说列表 parseFeeds3Items）、`comments.ts`（评论 parseFeeds3Comments，含多级与评论内图片 pic）、`likes.ts`（点赞 parseFeeds3Likes）、`meta.ts`（说说元数据 parseFeeds3PostMeta）、`helpers.ts`（Mention/Video/Reply/Device/好友/翻页参数）。对外仍从 `feeds3Parser.js` 引用，行为不变。
+- **feeds3 解析** - 实现位于 `src/qzone/feeds3/`，由 barrel 文件 `feeds3Parser.ts` 统一导出。子模块：`preprocess.ts`、`content.ts`、`feedDataCanonical.ts`（tid 归一）、`items.ts`（parseFeeds3Items）、`comments.ts`（parseFeeds3Comments / Scoped）、`likes.ts`、`meta.ts`（parseFeeds3PostMeta / Scoped）、`helpers.ts`。对外仍从 `feeds3Parser.js` 引用。
 
 - **`schemas.ts`** + **`validate.ts`** - Zod runtime validation with 10 schema sets
 - **`rawLogger.ts`** - Automatic raw response logging on validation failures
@@ -70,11 +71,7 @@ Native NapCat plugin proxying the bridge's REST API and event stream. Built sepa
 ## Key Design Patterns
 
 ### Fallback Strategy
-When APIs fail or are rate-limited, the client cascades through alternatives:
-1. Primary API (e.g., `emotion_cgi_msglist_v6`)
-2. Secondary API (e.g., `feeds3_html_more`)
-3. Mobile endpoints
-4. Count-only events (when details unavailable)
+Feeds and social data are biased toward **`feeds3_html_more`** because many documented PC/mobile JSON endpoints return **`-10000`, HTTP 500 empty body, or 404** in practice (see `doc/api-probe-results.md`, `npm run probe:doc`). Detail APIs are attempted but often fail; list-based and count-only paths remain as safety nets.
 
 ### Request Fingerprint Randomization
 - User-Agent rotation from `USER_AGENTS` pool

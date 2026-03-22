@@ -4,6 +4,8 @@
 
 import { log, htmlUnescape } from '../utils.js';
 import { preprocessHtml } from './preprocess.js';
+import { collectT1TidRefs } from './tidParams.js';
+import { canonicalPostTidFromFeedAttrs } from './feedDataCanonical.js';
 
 /** feeds3 HTML 中解析出来的单条点赞 */
 export interface Feeds3Like {
@@ -60,15 +62,10 @@ export function parseFeeds3Likes(
   const result = new Map<string, Feeds3Like[]>();
   const html = processedText ?? preprocessHtml(text).text;
 
-  const tidPattern = /t1_tid=([a-z0-9]+)/g;
-  const tidPositions: { tid: string; index: number }[] = [];
-  let tm: RegExpExecArray | null;
-  while ((tm = tidPattern.exec(html)) !== null) {
-    tidPositions.push({ tid: tm[1], index: tm.index });
-  }
+  const tidPositions = collectT1TidRefs(html);
 
   for (let i = 0; i < tidPositions.length; i++) {
-    const { tid } = tidPositions[i];
+    const { postTid: tid } = tidPositions[i];
     const startIdx = tidPositions[i].index;
     const endIdx = i < tidPositions.length - 1 ? tidPositions[i + 1].index : html.length;
     const block = html.slice(startIdx, endIdx);
@@ -94,10 +91,15 @@ export function parseFeeds3Likes(
     if (feedstype !== '101') continue;
 
     const likerUin = fm[1]!;
-    const tid = dataAttr(feedDataAttrs, 'tid');
+    const tidRaw = dataAttr(feedDataAttrs, 'tid');
     const ownerUin = dataAttr(feedDataAttrs, 'uin');
     const abstime = parseInt(dataAttr(feedDataAttrs, 'abstime') || '0', 10);
-    if (!tid || !likerUin || likerUin === '0') continue;
+    if (!tidRaw || !likerUin || likerUin === '0') continue;
+
+    const searchBeforeWide = html.substring(Math.max(0, fm.index - 8000), fm.index);
+    const searchAfterHead = fm[0].slice(0, 4000);
+    const tid =
+      canonicalPostTidFromFeedAttrs(feedDataAttrs, searchBeforeWide, searchAfterHead) || tidRaw;
 
     const blockStart = Math.max(0, fm.index - 600);
     const preceding = html.substring(blockStart, fm.index);

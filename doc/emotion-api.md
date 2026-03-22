@@ -54,6 +54,8 @@
 
 **限流**: 返回 `code: -10000` 时表示被限流，应降级到 feeds3。
 
+**实机（2026-03-22，`npm run probe:doc`）**: HTTP 200，业务体为 JSONP，`code=-10000`（「使用人数过多，请稍后再试」），与限流语义一致。当前仓库内 **`getEmotionList` 已不再调用本接口**，主路径为 **`feeds3_html_more` + 解析**；详见 [`doc/api-probe-results.md`](api-probe-results.md)。
+
 ### 移动端（备选）
 
 **URL**: `https://mobile.qzone.qq.com/get_mood_list`
@@ -70,7 +72,7 @@
 | `num` | 获取数量 |
 | `format` | `json` |
 
-**状态**: ❌ 实测返回 HTTP 404，当前不可用。
+**状态**: ❌ **实机 HTTP 404、空体**（2026-03-22），不可用；勿作降级。
 
 ---
 
@@ -110,6 +112,8 @@
 
 **问题**: GET 请求可能返回 0 字节空响应（taotao proxy 层限制），5 分钟冷却期后才重试 PC 路径。
 
+**实机（2026-03-22）**: 同账号下 **POST / GET 均为 HTTP 500 且空体**（与「空响应」同类故障，但表现为 500）。客户端仍按代码路径尝试，失败则走 mobile 与列表兜底。
+
 ### 移动端（fallback）
 
 **URL**: `https://mobile.qzone.qq.com/detail`
@@ -123,9 +127,11 @@
 | `cellid` | 说说 ID（注意字段名不同） |
 | `format` | `json` |
 
+**实机（2026-03-22）**: **HTTP 404、空体**，勿依赖为稳定 fallback。
+
 ### 列表 fallback
 
-当以上全部失败时，从 `getEmotionList` 结果中按 tid 匹配查找。
+当以上全部失败时，从 `getEmotionList`（feeds3 解析结果）中按 tid 匹配查找。
 
 ---
 

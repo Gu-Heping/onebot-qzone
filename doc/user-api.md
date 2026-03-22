@@ -87,7 +87,7 @@
 
 ## 5. 获取好友说说 feed（游标分页）
 
-好友说说的获取通过 `feeds3_html_more` 实现，使用 **scope=0** + 完整翻页参数（`outputhtmlfeed=1`、`pagenum`、`begintime` 等），仅返回 **appid=311** 的说说。
+好友动态流通过 `feeds3_html_more` 实现，使用 **scope=0** + 完整翻页参数（`outputhtmlfeed=1`、`pagenum`、`begintime` 等）。解析结果包含 **appid=311 说说、202 音乐/小程序分享等**（实现上会过滤 appid=217 等噪音条目）；**若本页 HTML 中出现当前登录用户自己的动态，也会包含在列表中**（与空间「好友动态」混流一致）。
 
 ```typescript
 // 首页：不传 cursor；续页：传上次返回的 next_cursor

@@ -107,6 +107,64 @@ function ok(data: unknown = null, echo?: string): OneBotResponse {
   return { status: 'ok', retcode: 0, data, echo };
 }
 
+/**
+ * OpenClaw / 部分网关会剥掉以下划线开头的字段；镜像无下划线 key 供验收侧读取。
+ * 评论里 `pic` 仅在解析到图 URL 时才会存在，补全为 `pic: []` 表示「本桥未解析出图片 URL」，避免被误读成「接口没返回 pic 字段」。
+ */
+function normalizeCommentTreeForTool(it: unknown): unknown {
+  if (!it || typeof it !== 'object') return it;
+  const o = { ...(it as Record<string, unknown>) };
+  if (!Array.isArray(o.pic)) o.pic = [];
+  if (typeof o._source === 'string' && o.parser_cell_source === undefined) {
+    o.parser_cell_source = o._source;
+  }
+  if (Array.isArray(o.replies)) {
+    o.replies = o.replies.map(normalizeCommentTreeForTool);
+  }
+  return o;
+}
+
+function enrichGetCommentListPayload(res: Record<string, unknown>): Record<string, unknown> {
+  const out = { ...res };
+  if (typeof out._source === 'string' && out.comment_data_source === undefined) {
+    out.comment_data_source = out._source;
+  }
+  const t = out._feeds3_total;
+  if (typeof t === 'number' && out.feeds3_comment_total === undefined) {
+    out.feeds3_comment_total = t;
+  } else if (typeof t === 'string' && t !== '' && out.feeds3_comment_total === undefined) {
+    const n = Number(t);
+    if (Number.isFinite(n)) out.feeds3_comment_total = n;
+  }
+  // OpenClaw / 部分工具层只认驼峰或短 key；与 comment_data_source 镜像并存
+  if (typeof out.comment_data_source === 'string') {
+    out.commentListSource = out.comment_data_source;
+  }
+  if (typeof out.feeds3_comment_total === 'number') {
+    out.commentListTotal = out.feeds3_comment_total;
+  }
+  for (const key of ['commentlist', 'comment_list', 'comments'] as const) {
+    const arr = out[key];
+    if (Array.isArray(arr)) {
+      out[key] = arr.map((x) => normalizeCommentTreeForTool(x));
+    }
+  }
+  const data = out.data;
+  if (data && typeof data === 'object') {
+    const d = { ...(data as Record<string, unknown>) };
+    let touched = false;
+    for (const key of ['commentlist', 'comment_list', 'comments', 'list'] as const) {
+      const arr = d[key];
+      if (Array.isArray(arr)) {
+        d[key] = arr.map((x) => normalizeCommentTreeForTool(x));
+        touched = true;
+      }
+    }
+    if (touched) out.data = d;
+  }
+  return out;
+}
+
 function fail(retcode: number, msg: string, echo?: string): OneBotResponse {
   return { status: 'failed', retcode, data: null, message: msg, echo };
 }
@@ -322,8 +380,13 @@ export class ActionHandler {
     const appid = safeInt(p['appid'] ?? 0);
     const abstime = safeInt(p['abstime'] ?? 0);
     const res = await this.client.commentEmotion(ouin, tid, content, replyId, replyUin, appid, abstime);
-    if ((res as Record<string, unknown>)['code'] !== 0)
-      return fail(1500, String((res as Record<string, unknown>)['message'] ?? ''), echo);
+    const r = res as Record<string, unknown>;
+    const okComment = r['code'] === 0 || r['ret'] === 0;
+    if (!okComment) {
+      const hint = String(r['message'] ?? r['msg'] ?? r['submsg'] ?? '').trim()
+        || `code=${String(r['code'])} ret=${String(r['ret'])}`;
+      return fail(1500, hint || '评论失败', echo);
+    }
     // 从返回 HTML 中提取刚发布评论的 comment_id
     let commentId: string | undefined;
     const feeds = String((res as any)?.data?.feeds ?? '');
@@ -541,7 +604,7 @@ export class ActionHandler {
     const res = await this.client.getCommentsBestEffort(uin, tid, num, pos, { fastMode });
     const cnt = [res['commentlist'], res['comment_list'], res['comments'], res['data']].find(Array.isArray) as unknown[] | undefined;
     log('INFO', `get_comment_list: code=${(res as Record<string, unknown>)['code']} comments=${cnt?.length ?? 0}`);
-    return ok(res, echo);
+    return ok(enrichGetCommentListPayload(res as Record<string, unknown>), echo);
   }
 
   async action_get_like_list(p: Record<string, unknown>, echo?: string): Promise<OneBotResponse> {

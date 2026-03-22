@@ -211,6 +211,49 @@ export class QzoneClient {
   }
 
   /**
+   * parseFeeds3Comments 按回复链里的 t1_tid 分桶（常为 d{uin}_{abstime}_…），说说列表 tid 常为 fkey。
+   * 在 postMetaCache 已有该 fkey 的 abstime 时，把评论数组挂到 fkey 下，供 getCommentsBestEffort(tid) 命中。
+   *
+   * 注意：同一 uin 在同一秒可能有多条动态，多个内部桶会同时包含 `_${abstime}_`。
+   * 旧逻辑取「评论数最多」的桶，易把**相邻帖/转发帖**的评论挂到错误 hex tid（假串帖）。
+   * 现逻辑：先按作者 uin 收窄 `d{uin}_` 前缀桶；若仍有多候选则**放弃别名**（宁缺勿滥）。
+   */
+  private aliasFeeds3CommentsToCanonicalTid(canonicalTid: string): void {
+    if (!canonicalTid || this.feeds3Comments.has(canonicalTid)) return;
+    const meta = this.postMetaCache.get(canonicalTid);
+    const abstime = meta?.abstime;
+    const authorUin = meta?.uin?.trim() ?? '';
+    if (abstime == null || abstime <= 0) return;
+    const asStr = String(abstime);
+    const embedded = `_${asStr}_`;
+    const candidates: string[] = [];
+    for (const [k, cmts] of this.feeds3Comments) {
+      if (!cmts?.length || k === canonicalTid) continue;
+      if (!(k.includes(embedded) || k === asStr)) continue;
+      if (authorUin && k.startsWith('d') && !k.startsWith(`d${authorUin}_`)) continue;
+      candidates.push(k);
+    }
+    if (candidates.length !== 1) {
+      if (candidates.length > 1) {
+        log(
+          'WARNING',
+          `aliasFeeds3CommentsToCanonicalTid: 跳过 ${canonicalTid}，abstime=${asStr} 匹配到 ${candidates.length} 个评论桶（可能同秒多帖），避免串帖`,
+        );
+      }
+      return;
+    }
+    const bestKey = candidates[0]!;
+    const cmts = this.feeds3Comments.get(bestKey)!;
+    this.feeds3Comments.set(canonicalTid, cmts);
+    const ft = this.feeds3CommentsFetchedAt.get(bestKey);
+    if (ft != null) this.feeds3CommentsFetchedAt.set(canonicalTid, ft);
+    log(
+      'DEBUG',
+      `aliasFeeds3CommentsToCanonicalTid: ${canonicalTid} <- ${bestKey.length > 56 ? `${bestKey.slice(0, 56)}…` : bestKey}`,
+    );
+  }
+
+  /**
    * 若传入的 tid 实为 abstime（纯数字），用 postMetaCache 反查对应的 key（hex tid），
    * 评论接口 PC/mobile 需要 key 格式，用 abstime 会返回空或 -3。
    */
@@ -237,6 +280,43 @@ export class QzoneClient {
     const likeCurkey = String(item['likeCurkey'] ?? '');
     const abstime = Number(item['created_time'] ?? item['createTime'] ?? 0);
     this.cachePostMeta(tid, { uin, appid, typeid, likeUnikey, likeCurkey, abstime });
+  }
+
+  /** msglist 条目的 tid / cellid 与目标 tid 匹配（避免 string/number 严格 === 漏匹配） */
+  private itemMatchesTid(item: Record<string, unknown>, tid: string): boolean {
+    const w = String(tid).trim();
+    return String(item['tid'] ?? '').trim() === w || String(item['cellid'] ?? '').trim() === w;
+  }
+
+  /**
+   * PC 详情全灭时：分页搜 feeds_html_act_all 的 msglist，命中则同 list 兜底展开到顶层。
+   */
+  private async detailFromActAllMsglist(uin: string, tid: string): Promise<ApiResponse | null> {
+    let start = 0;
+    const count = 30;
+    for (let p = 0; p < 18; p++) {
+      const act = await this.getFeedsHtmlActAll(uin, { hostUin: uin, start, count, scope: 0 });
+      if (Number(act['code'] ?? 0) !== 0) break;
+      const list = (act['msglist'] as Record<string, unknown>[]) ?? [];
+      for (const msg of list) {
+        if (!this.itemMatchesTid(msg, tid)) continue;
+        return {
+          ...msg,
+          code: 0,
+          data: msg,
+          message: 'success (from act_all list)',
+          _detail_semantic: {
+            source: 'feeds_html_act_all_fallback',
+            note:
+              'getdetailv6/mobile 不可用；正文来自 ic2 feeds_html_act_all 列表项，已展开到顶层 content/conlist。',
+          },
+        } as ApiResponse;
+      }
+      if (!act['has_more']) break;
+      const ns = act['next_start'];
+      start = typeof ns === 'number' && Number.isFinite(ns) ? ns : start + count;
+    }
+    return null;
   }
 
   /** 好友缓存：uin -> { uin, nickname, avatar, lastSeen }，持久化到 friends.json */
@@ -1576,6 +1656,15 @@ export class QzoneClient {
       const msglist = filtered.slice(0, count);
       for (const item of msglist) this.cachePostMetaFromRaw(item);
 
+      // 与 feeds3_html_more 一致：把本页 HTML 内嵌评论区并入全局桶，供 getCommentsBestEffort 命中
+      // （否则仅通过 act_feed 看到的帖，get_comments 永远走 feeds3_more 首屏，会漏评）
+      try {
+        const cm = _parseFeeds3Comments(text);
+        this.mergeFeeds3Comments(cm);
+      } catch (e) {
+        log('WARN', `feeds_html_act_all: parseFeeds3Comments failed: ${e}`);
+      }
+
       const explicitNoMore = /hasMoreFeeds\s*:\s*false/.test(text);
       const explicitMore = /hasMoreFeeds\s*:\s*true/.test(text);
       const has_more = explicitNoMore
@@ -1877,8 +1966,8 @@ export class QzoneClient {
 
   /**
    * 获取好友说说动态（scope=0 filter=all）。
-   * - `fastMode=true`（HTTP 默认由 actions 开启）：**单次** fetchFeeds3Html + 单页解析 + 本地筛好友，快速返回。
-   * - `fastMode=false`（poller 默认）：保留多轮翻页直至凑满 num（后台完整性）。
+   * - `fastMode=true`（HTTP 默认由 actions 开启）：**单次** fetchFeeds3Html + 单页解析，快速返回（与 slow 一致保留 HTML 中出现的本人动态；不再排除 loginUin）。
+   * - `fastMode=false`（poller 默认）：多轮翻页直至凑满 num（后台完整性）。
    */
   async getFriendFeeds(cursor = '', num = 50, opts?: { fastMode?: boolean }): Promise<ApiResponse> {
     this.requireLogin();
@@ -1892,23 +1981,10 @@ export class QzoneClient {
     // #endregion
     const EXCLUDED_APPIDS = new Set(['217']);
     const want = Math.max(1, Math.min(200, num));
-    const selfUin = String(this.qqNumber ?? '');
     const seenTids = new Set<string>();
     const merged: Record<string, unknown>[] = [];
     let nextCursor = cursor;
     const maxRounds = 20;
-
-    const ingestFriendOnlyItem = (item: Record<string, unknown>): boolean => {
-      if (EXCLUDED_APPIDS.has(String(item['appid'] ?? ''))) return false;
-      const tid = String(item['tid'] ?? item['cellid'] ?? '').trim();
-      const author = String(item['opuin'] ?? item['uin'] ?? '').trim();
-      if (!tid || !author || author === selfUin) return false;
-      if (seenTids.has(tid)) return false;
-      seenTids.add(tid);
-      merged.push(item);
-      this.cachePostMetaFromRaw(item);
-      return true;
-    };
 
     const ingestSlowItem = (item: Record<string, unknown>): void => {
       if (EXCLUDED_APPIDS.has(String(item['appid'] ?? ''))) return;
@@ -1931,7 +2007,7 @@ export class QzoneClient {
         const pageCursor = hasMoreFeeds ? _extractExternparam(text) : '';
         const parseCap = Math.min(200, Math.max(80, want * 4));
         const all = this.parseFeeds3Items(text, undefined, undefined, parseCap, false);
-        for (const item of all) ingestFriendOnlyItem(item);
+        for (const item of all) ingestSlowItem(item);
         const msglist = merged.slice(0, want);
         const has_more = Boolean(pageCursor && hasMoreFeeds);
         log('DEBUG', `[feeds3][fast] mode=fast fetch_count=1 items=${msglist.length}`);
@@ -1939,7 +2015,7 @@ export class QzoneClient {
           'DEBUG',
           `[feeds3][fast] has_more=${has_more} next_cursor=${pageCursor ? `${pageCursor.slice(0, 120)}${pageCursor.length > 120 ? '…' : ''}` : '(empty)'}`,
         );
-        log('DEBUG', `getFriendFeeds: fast scope=0 friend-only ${msglist.length} posts, next_cursor=${pageCursor || '(end)'}`);
+        log('DEBUG', `getFriendFeeds: fast scope=0 merged ${msglist.length} posts (incl. self if in HTML), next_cursor=${pageCursor || '(end)'}`);
         return {
           code: 0,
           message: 'ok',
@@ -2126,14 +2202,28 @@ export class QzoneClient {
       if (this.isValidApiResponse(p)) return p;
     } catch (exc) { log('DEBUG', `Detail mobile fallback failed: ${exc}`); }
 
-    // emotion_list fallback
+    // emotion_list fallback：扩大条数/翻页，tid 用字符串对齐 cellid
     try {
-      const elist = await this.getEmotionList(uin, 0, 20);
+      const elist = await this.getEmotionList(uin, 0, 80, undefined, undefined, undefined, 15);
       const msglist = Array.isArray(elist['msglist']) ? elist['msglist'] as Record<string, unknown>[] : [];
       for (const msg of msglist) {
-        if (msg['tid'] === tid) return { code: 0, data: msg, message: 'success (from list)' };
+        if (!this.itemMatchesTid(msg, tid)) continue;
+        return {
+          ...msg,
+          code: 0,
+          data: msg,
+          message: 'success (from list)',
+          _detail_semantic: {
+            source: 'emotion_list_fallback',
+            note:
+              'PC getdetailv6 不可用，正文来自 feeds3 列表项；已镜像到顶层 content/conlist 等字段。',
+          },
+        } as ApiResponse;
       }
     } catch { /* ignore */ }
+
+    const actDetail = await this.detailFromActAllMsglist(uin, tid);
+    if (actDetail) return actDetail;
 
     return lastPayload;
   }
@@ -2165,6 +2255,8 @@ export class QzoneClient {
     const forceRefresh = options?.forceRefresh ?? false;
     const maxCacheAgeSec = options?.maxCacheAgeSec ?? 90;
     let feeds3List = this.feeds3Comments.get(tid);
+    this.aliasFeeds3CommentsToCanonicalTid(tid);
+    feeds3List = this.feeds3Comments.get(tid);
     const cacheAgeSec = this.commentCacheAgeSeconds(tid);
 
     const wrapCommentPage = (
@@ -2214,28 +2306,56 @@ export class QzoneClient {
 
     // 如果缓存中没有该 tid 的评论，主动拉取 feeds3 HTML 来解析
     if (!feeds3List || feeds3List.length === 0) {
-      log('INFO', `getCommentsBestEffort: feeds3Comments 缓存未命中，主动拉取 uin=${uin} tid=${tid}`);
+      log('INFO', `getCommentsBestEffort: feeds3Comments 缓存未命中，拉取 HTML 解析 uin=${uin} tid=${tid}`);
       try {
-        const htmlText = await this.fetchFeeds3Html(uin, true, 1, 50);
-        commentHttpFetches = 1;
-        let comments = _parseFeeds3Comments(htmlText);
+        commentHttpFetches = 0;
 
-        // 好友动态：scope=1 常不含其 tid；本人 fast 路径下若未命中则多为「该帖无评论」而非缺页，避免无谓二次请求
-        if (!comments.has(tid) && (!fastMode || uin !== this.qqNumber)) {
-          log('DEBUG', `getCommentsBestEffort: scope=1 未找到 tid=${tid}，尝试 scope=0 好友动态流`);
-          const htmlText2 = await this.fetchFeeds3Html(this.qqNumber!, false, 0, 50, '', undefined, 'all', 'all');
+        // ① 优先好友动态流（与 getFriendFeeds fast 同源）：列表里出现的帖大多在这里，而非作者空间首页
+        if (this.qqNumber) {
+          const htmlFriend = await this.fetchFeeds3Html(this.qqNumber!, false, 0, 50, '', undefined, 'all', 'all');
           commentHttpFetches += 1;
-          const comments2 = _parseFeeds3Comments(htmlText2);
-          for (const [postTid, cmts] of comments2) {
-            if (!comments.has(postTid)) {
-              comments.set(postTid, cmts);
-            }
-          }
+          this.mergeFeeds3Comments(_parseFeeds3Comments(htmlFriend));
+          this.aliasFeeds3CommentsToCanonicalTid(tid);
+          feeds3List = this.feeds3Comments.get(tid);
+          log(
+            'DEBUG',
+            `getCommentsBestEffort: 好友流解析后 tid=${tid} 条数=${feeds3List?.length ?? 0}`,
+          );
         }
 
-        this.mergeFeeds3Comments(comments);
-        feeds3List = this.feeds3Comments.get(tid);
-        log('DEBUG', `getCommentsBestEffort: 主动拉取后 feeds3 解析到 ${feeds3List?.length ?? 0} 条评论`);
+        // ② 再拉作者空间 scope=1，补「仅出现在对方主页」或未命中好友首屏的帖
+        if (!feeds3List || feeds3List.length === 0) {
+          const htmlAuthor = await this.fetchFeeds3Html(uin, true, 1, 50);
+          commentHttpFetches += 1;
+          this.mergeFeeds3Comments(_parseFeeds3Comments(htmlAuthor));
+          this.aliasFeeds3CommentsToCanonicalTid(tid);
+          feeds3List = this.feeds3Comments.get(tid);
+          log(
+            'DEBUG',
+            `getCommentsBestEffort: 作者空间解析后 tid=${tid} 条数=${feeds3List?.length ?? 0}`,
+          );
+        }
+
+        // ③ ic2 feeds_html_act_all（与 qzone_get_space_html_act_feed 同源）：帖常只出现在「全部动态」HTML，分页直至命中评论桶或无可翻
+        if ((!feeds3List || feeds3List.length === 0) && uin) {
+          let actStart = 0;
+          const actCount = 20;
+          const maxActPages = 25;
+          for (let ap = 0; ap < maxActPages && (!feeds3List || feeds3List.length === 0); ap++) {
+            const act = await this.getFeedsHtmlActAll(uin, { hostUin: uin, start: actStart, count: actCount, scope: 0 });
+            commentHttpFetches += 1;
+            this.aliasFeeds3CommentsToCanonicalTid(tid);
+            feeds3List = this.feeds3Comments.get(tid);
+            if (feeds3List?.length) {
+              log('INFO', `getCommentsBestEffort: feeds_html_act_all 第 ${ap + 1} 页命中 tid=${tid} 评论 ${feeds3List.length} 条`);
+              break;
+            }
+            if (act['code'] !== 0 && act['code'] != null) break;
+            if (!act['has_more']) break;
+            const ns = act['next_start'];
+            actStart = typeof ns === 'number' && Number.isFinite(ns) ? ns : actStart + actCount;
+          }
+        }
       } catch (e) {
         log('WARNING', `getCommentsBestEffort: 主动拉取 feeds3 失败: ${e}`);
       }
@@ -2258,10 +2378,11 @@ export class QzoneClient {
       );
     }
 
-    log('WARNING', `getCommentsBestEffort: 未获取到评论`);
+    log('WARNING', `getCommentsBestEffort: 未在 feeds3 好友流+作者空间首页解析到该 tid 的评论`);
     const empty = {
       code: -1,
-      message: 'all comment methods failed',
+      message:
+        'comments_not_found_in_feeds3: 已尝试好友流、作者 feeds3(scope=1)、feeds_html_act_all 分页；仍无桶则帖无展开评论、tid 不一致或 HTML 结构变化',
       commentlist: [] as unknown[],
       has_more: false,
       next_cursor: '',
@@ -2635,30 +2756,51 @@ export class QzoneClient {
     }
     if (!appid) appid = 311;
 
-    // 统一使用 h5.qzone.qq.com 域名的 emotion_cgi_re_feeds 接口
-    // 抓包验证：topicId 格式为 {ouin}_{tid}__1，paramstr=2 表示回复评论
-    const url = `https://h5.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_re_feeds?g_tk=${this.getGtk()}`;
-
     // 回复评论时，需要在 content 前添加 @提及 格式：@{uin:xxx,nick:xxx,auto:1}
     let finalContent = content;
     if (replyCommentId && replyUin) {
-      // 获取被回复者的昵称
       let nick: string;
       if (replyUin === this.qqNumber) {
-        // 回复自己的评论：从 Cookie 获取自己的昵称
         nick = this.getNicknameFromCookie() || replyUin;
       } else {
-        // 回复他人的评论：从好友缓存获取昵称
         const friendInfo = this.friendCache.get(replyUin);
         nick = friendInfo?.nickname || replyUin;
       }
-      // 如果 content 没有以 @{ 开头，自动添加 @提及 前缀
       if (!content.startsWith('@{')) {
         finalContent = `@{uin:${replyUin},nick:${nick},auto:1} ${content}`;
       }
     }
-    
-    // 构建完整的请求参数（与浏览器抓包一致）
+
+    const qzRef = this.getQzreferrer();
+    const headers = this.pcHeaders(qzRef);
+
+    // ① PC user 代理 re_feeds（与 doc/social-api.md、forwardEmotion 降级一致）：topicId={ouin}_{tid}，format=json
+    const userReFeeds = `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_re_feeds?g_tk=${this.getGtk()}`;
+    const userParams: Record<string, string> = {
+      hostUin: ouin,
+      topicId: `${ouin}_${tid}`,
+      content: finalContent,
+      format: 'json',
+      qzreferrer: qzRef,
+    };
+    if (replyCommentId && replyUin) {
+      userParams['commentId'] = replyCommentId;
+      userParams['replyUin'] = replyUin;
+      userParams['commentUin'] = replyUin;
+    }
+    log('DEBUG', `commentEmotion: try user re_feeds topicId=${userParams.topicId} reply=${replyCommentId ? 'yes' : 'no'} content=${finalContent.substring(0, 40)}...`);
+    const respUser = await this.post(userReFeeds, {
+      data: new URLSearchParams(userParams),
+      headers,
+    });
+    const pUser = safeDecodeJsonResponse(respUser.data);
+    const okUser =
+      (pUser['code'] as number) === 0
+      || (pUser['ret'] as number) === 0;
+    if (okUser) return pUser;
+
+    // ② h5 路径（旧抓包）：topicId 带 __1、format=fs，部分账号仅在此通路成功
+    const h5Url = `https://h5.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_re_feeds?g_tk=${this.getGtk()}`;
     const data: Record<string, string> = {
       topicId: `${ouin}_${tid}__1`,
       feedsType: '100',
@@ -2677,29 +2819,22 @@ export class QzoneClient {
       richtype: '',
       private: '0',
       paramstr: replyCommentId && replyUin ? '2' : '1',
-      qzreferrer: this.getQzreferrer(),
+      qzreferrer: qzRef,
     };
-    
-    // 回复评论时：同时传 commentId/commentUin（h5 抓包）与 t1_*/t2_*（feeds3 文档）
-    // - t1_uin/t1_tid：帖子主人和帖子 TID
-    // - t2_uin/t2_tid：被回复者 QQ 和被回复评论序号（feeds3 的 data-tid，即帖子内序号）
     if (replyCommentId && replyUin) {
       data['commentId'] = replyCommentId;
       data['commentUin'] = replyUin;
-      // feeds3 文档要求的参数
       data['t1_uin'] = ouin;
       data['t1_tid'] = tid;
       data['t2_uin'] = replyUin;
-      data['t2_tid'] = replyCommentId;  // feeds3 的 data-tid（序号）
+      data['t2_tid'] = replyCommentId;
     }
-
-    log('DEBUG', `commentEmotion: topicId=${data.topicId} paramstr=${data.paramstr} commentId=${replyCommentId ?? 'none'} commentUin=${replyUin ?? 'none'} t1_uin=${ouin} t1_tid=${tid} t2_uin=${replyUin ?? 'none'} t2_tid=${replyCommentId ?? 'none'} content=${finalContent.substring(0, 50)}...`);
-    
-    const resp = await this.post(url, {
+    log('DEBUG', `commentEmotion: fallback h5 topicId=${data.topicId} paramstr=${data.paramstr}`);
+    const resp = await this.post(h5Url, {
       data: new URLSearchParams(data),
-      headers: this.pcHeaders(this.getQzreferrer())
+      headers,
     });
-    return parseJsonp(resp.text) as ApiResponse;
+    return safeDecodeJsonResponse(resp.data);
   }
 
   async deleteComment(uin: string, tid: string, commentId: string, commentUin?: string): Promise<ApiResponse> {

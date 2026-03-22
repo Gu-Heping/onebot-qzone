@@ -292,6 +292,8 @@ export interface QzoneComment {
   isPrivate?: number;
   /** 评论序号（帖子内从1递增） */
   tid?: number;
+  /** feeds3 HTML 解析顺序（仅 feeds3；createtime 缺失时用于去重消歧） */
+  feeds3ParseSeq?: number;
   /** 包含的表情列表 */
   emojis?: EmojiInfo[];
 }

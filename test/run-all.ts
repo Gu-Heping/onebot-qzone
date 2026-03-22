@@ -43,6 +43,9 @@ async function runUnitSuites(): Promise<SuiteResult[]> {
     (await import('./unit/feeds3-comments.test.ts')).run,
     (await import('./unit/feeds3-enhanced.test.ts')).run,
     (await import('./unit/feeds3-items-parse.test.ts')).run,
+    (await import('./unit/feeds3-meta.test.ts')).run,
+    (await import('./unit/qzone-dedup-real.test.ts')).run,
+    (await import('./unit/comment-dedup.test.ts')).run,
   ];
   const results: SuiteResult[] = [];
   for (const run of suites) {

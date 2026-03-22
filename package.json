@@ -16,7 +16,9 @@
     "verify": "tsx scripts/verify-endpoints.ts",
     "verify:readonly": "tsx scripts/verify-endpoints.ts --skip-write",
     "verify:http": "tsx scripts/verify-bridge-http.ts",
-    "verify:tools": "tsx scripts/verify-all-qzone-tools-http.ts"
+    "verify:tools": "tsx scripts/verify-all-qzone-tools-http.ts",
+    "probe:doc": "tsx scripts/probe-doc-endpoints.ts",
+    "catch-up-seen": "tsx scripts/catch-up-seen-state.ts"
   },
   "dependencies": {
     "axios": "^1.7.9",

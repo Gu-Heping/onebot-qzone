@@ -4,7 +4,7 @@ QQ空间 → OneBot v11 协议桥接服务（TypeScript 原生实现）。
 
 通过逆向 QZone Web API，将 QQ 空间的说说、评论、点赞等功能暴露为标准 [OneBot v11](https://github.com/botuniverse/onebot-11) 接口，并提供 **NapCat 原生插件** 以零配置接入 NapCat 生态。
 
-**相关项目**：[OpenClaw](https://github.com/openclaw/openclaw) 用户可搭配 [openclaw-napcat-qq](https://github.com/Gu-Heping/openclaw-napcat-qq) 插件，通过 Agent 工具（如 `qzone_get_friend_feeds`、`qzone_get_posts`）调用本桥接。
+**相关项目**：[OpenClaw](https://github.com/openclaw/openclaw) 用户可搭配 [openclaw-napcat-qq](https://github.com/Gu-Heping/openclaw-napcat-qq) 插件，通过 Agent 工具（如 `qzone_get_friend_feeds`、`qzone_get_posts`）调用本桥接。联调与验收清单见 **[`doc/openclaw-acceptance.md`](doc/openclaw-acceptance.md)**。
 
 > 本项目仅供学习交流，请勿用于非法用途。
 
@@ -27,12 +27,8 @@ QQ空间 → OneBot v11 协议桥接服务（TypeScript 原生实现）。
 ### 反限流 & 智能路由
 
 - `emotion_cgi_msglist_v6` 被限流（-10000）时自动降级到 `feeds3_html_more`
-- 评论详情获取三级策略：
-  1. **feeds3 内嵌评论**：`feeds3_html_more` 返回的 HTML 中嵌有最近评论（评论者 QQ / 昵称 / 内容 / 时间），零额外请求
-  2. **emotionList 内嵌评论**：`emotion_cgi_msglist_v6` 返回说说时已携带 `commentlist`（API 限流降级到 feeds3 时不可用）
-  3. **getCommentsLite 单次 POST**：仅发一个 `emotion_cgi_getcmtreply_v6` POST，circuit breaker 保护（2 次失败后 30 分钟冷却）
-  4. **纯计数事件**：前三级不可用时，发射仅含 +N 计数的事件
-- 评论/详情接口 `getCommentsBestEffort` 保留多变体轮询，记住命中变体下次优先使用（供 API 调用，非轮询器）
+- **评论列表**：`getCommentsBestEffort` 以 **feeds3 HTML**（好友流、作者 `scope=1`、未命中则 **`feeds_html_act_all` 分页**）解析为主；PC/mobile 评论接口在多数环境下不可用，见 [`doc/api-probe-results.md`](doc/api-probe-results.md)
+- 说说详情：PC `getdetailv6` 多路失败后可用 **列表 / `act_all` 兜底**（返回中常见 `success (from act_all list)` 类 `message`）
 - **点赞监听 bestEffort 降级**（新增）：
   1. **PC detail**：`emotion_cgi_getdetailv6` 获取点赞列表
   2. **Mobile detail**：mobile 端详情接口降级
@@ -41,7 +37,7 @@ QQ空间 → OneBot v11 协议桥接服务（TypeScript 原生实现）。
 - 点赞检测双重策略：feeds3 HTML 内嵌点赞者详情 + `qz_opcnt2` 计数兜底
   - feeds3 HTML 解析出点赞者 QQ、昵称、时间、图标，事件推送可带详情
   - feeds3 只覆盖最近点赞，剩余用计数事件补充（优先匹配缓存用户信息）
-- **是否已点赞**：通过 feeds3 获取的说说列表里，每条带 **`isLiked`**（boolean），表示当前登录用户是否已点过赞；也可调用 `get_like_list` 拿到点赞者列表，判断当前用户是否在列表中
+- **是否已点赞**：feeds3 说说列表常带 **`isLiked`**；**`get_like_list` 解析结果可能与 `traffic.like` 不一致**（列表仅覆盖当前 HTML 能展开到的点赞人，非全量）
 - 点赞使用 `internal_dolike_app` → `like_cgi_likev6` → Mobile 三级 fallback
 - 图片 URL 提取优先级：`url2` → `url3` → `url1` → `smallurl`（高清优先）
 - feeds3 LRU 缓存采用 O(1) Map 插入序逐出
@@ -278,7 +274,7 @@ QZONE_PLAYWRIGHT_HEADLESS=1 npm run dev
 | `get_traffic_data` | 获取说说流量统计 | `user_id`, `tid` |
 | `set_emotion_privacy` | 设置说说隐私 | `tid`, `privacy`（`private`/`public`） |
 | `get_portrait` | 获取头像和昵称 | `user_id` |
-| `get_friend_feeds` | 获取好友最近说说（游标分页） | `cursor`、`num`/`count`；默认附带图片 base64（`include_image_data=false` 可关闭）；仅返回 appid=311 说说 |
+| `get_friend_feeds` | 获取好友动态流（feeds3，游标分页） | `cursor`、`num`/`count`；`fast_mode` 默认 `1`；含好友与 HTML 中出现的本人动态；含 appid=311/202 等（排除 217 等噪音）；默认附带图片 base64（`include_image_data=false` 可关闭） |
 | `get_album_list` | 获取相册列表 | `user_id`（可选） |
 | `get_photo_list` | 获取照片列表 | `album_id` |
 | `upload_image` | 上传图片 | `base64` 或 `url` |
@@ -336,6 +332,7 @@ npm run verify           # 端点健康检查（读 + 写）
 npm run verify:readonly  # 端点健康检查（仅读接口）
 npm run verify:http      # 对已启动 bridge 做 HTTP 登录/昵称抽检
 npm run verify:tools     # HTTP 对齐全部 qzone 工具对应 action（可加 --write / --strict）
+npm run catch-up-seen    # 真实接口回填 seen_post + seen_interactive_state（建议停 bridge 后跑）
 ```
 
 ### 测试说明
@@ -343,6 +340,7 @@ npm run verify:tools     # HTTP 对齐全部 qzone 工具对应 action（可加 
 - **单元测试**：`test/unit/` 下 10 个测试套件，共 127 项，纯本地运行不需要登录。
 - **API 测试**：需先启动 bridge 并登录，`--readonly` 模式仅验证读接口。
 - **端点健康检查**：`scripts/verify-endpoints.ts`，启动即检验 8 个读 + 2 个写端点，输出彩色 PASS/FAIL/SKIP 报告。
+- **真实数据导出（人工核对）**：`scripts/dump-friend-feeds-once.ts` → `feeds_manual_dump.json`；`scripts/dump-comments-for-feeds-once.ts` → `comments_manual_dump.json`（按动态 `tid`/`uin` 调 `getCommentsBestEffort`，feeds3 评论；仅当该帖在拉取到的好友流 HTML 里**嵌了评论区**时才有条目）。
 - **HTTP 全量工具**：`scripts/verify-all-qzone-tools-http.ts`（`verify:tools`），对 `127.0.0.1:ONEBOT_PORT` 真实 POST；加 **`--strict`** 时除「有返回」外还要求首条说说/详情等结构完整；`fetch_image` 白名单含 `qlogo*.store.qq.com` 等与头像 URL 一致。
 - **真实数据回归**：`npx tsx test/verify-real-feeds.ts`（需配置 Cookie）会校验 getEmotionList/getFriendFeeds、归一化结果，并输出含图说说数、多级评论（一级/二级/有回复的帖子数）、含图评论数。
 
@@ -350,6 +348,7 @@ npm run verify:tools     # HTTP 对齐全部 qzone 工具对应 action（可加 
 
 - **根因（桥接）**：轮询发现「新评论」会上报 EventHub。若 **评论者就是当前登录号**（Bot 在自己空间下自评），旧逻辑仍会推送，上游再自动回复 → **死循环**。已在 `poller` 中 **跳过推送本人评论与本人点赞**（仍会记入 `seen*`，避免反复当「新」）。
 - **他人评论也重复推送**：`trackTids` 超过上限会 **裁剪**旧 tid；此前实现会同时 **删掉** `seenCommentIds` / `seenLikeUins`。该帖再次进入「最近说说」后，所有旧评论会被当成全新 → **同一评论多次上报**。现已 **保留**已见评论/点赞集合，仅删 `commentWarmTids` / `knownCounts` 等与「是否见过」无关的缓存。
+- **重启后又把旧评论当新的**：`seenCommentIds` / `seenLikeUins` / `knownCounts` 会持久化到 `{QZONE_CACHE_PATH}/seen_interactive_state.json`，与 `seen_post_tids.json` 一样随轮询定期落盘。评论在 **仅 feeds3 HTML 可用** 时，`data-tid` 常为短楼层号，去重键由 `src/bridge/commentDedup.ts` 生成：**短纯数字**走内容指纹 `h:tid:…`，**长数字或含 `_r_` 的合成 id** 走 `id:tid:…`；事件里的 `comment_id` 仍为原始值。若需**立刻**回填，先停 bridge 再 `npm run catch-up-seen` 后重启。若某帖仍拉不到评论列表，计数会尽量用 `qz_opcnt2` 对齐。
 - **验收脚本**：`verify:tools --write` 会真实发说说、点赞，**会触发 WS 事件**；读请求也会更新评论缓存。生产验收可临时关 `ONEBOT_EMIT_COMMENT_EVENTS` 等，详见脚本文件头说明。
 
 ### 调试获取评论

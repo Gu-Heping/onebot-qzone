@@ -6,6 +6,7 @@ import {
   buildStablePostKeyFromItem,
   seenLookupKeysForPost,
 } from './stablePostKey.js';
+import { commentDedupMark, commentDedupSeen } from './commentDedup.js';
 import { safeInt } from './utils.js';
 import { htmlUnescape, log } from '../qzone/utils.js';
 import { processEmojis, parseEmojis, type EmojiConvertOptions } from '../qzone/emoji.js';
@@ -15,7 +16,7 @@ import pLimit from 'p-limit';
 import type {
   OneBotEvent, NormalizedItem, QzoneComment, QzoneLike,
 } from '../qzone/types.js';
-import { readFileSync, writeFileSync, mkdirSync } from 'fs';
+import { readFileSync, writeFileSync, mkdirSync, renameSync } from 'fs';
 import { join } from 'path';
 
 // ─────────────────────────────────────────────────────────
@@ -263,7 +264,7 @@ export function normalizeEmotion(raw: Record<string, unknown>, selfUin: string):
   };
 }
 
-function normalizeComment(raw: Record<string, unknown>): QzoneComment {
+export function normalizeComment(raw: Record<string, unknown>): QzoneComment {
   const commentId = String(raw['commentid'] ?? raw['comment_id'] ?? raw['id'] ?? '');
   const uin = String(raw['uin'] ?? raw['commentuin'] ?? '');
   const nickname = stripHtml(String(raw['name'] ?? raw['nick'] ?? ''));
@@ -286,6 +287,9 @@ function normalizeComment(raw: Record<string, unknown>): QzoneComment {
   const replyToCommentId = raw['reply_to_comment_id'] != null ? String(raw['reply_to_comment_id']) : (raw['replyToCommentId'] != null ? String(raw['replyToCommentId']) : undefined);
   const parentCommentId = raw['parent_comment_id'] != null ? String(raw['parent_comment_id']) : (raw['parentCommentId'] != null ? String(raw['parentCommentId']) : undefined);
   const pic = Array.isArray(raw['pic']) ? (raw['pic'] as string[]) : undefined;
+  const seqRaw = raw['_feeds3_seq'];
+  const feeds3ParseSeq =
+    typeof seqRaw === 'number' && Number.isFinite(seqRaw) ? seqRaw : undefined;
   return {
     commentId, uin, nickname, content, createdTime,
     ...(isReply && { isReply: true }),
@@ -294,10 +298,11 @@ function normalizeComment(raw: Record<string, unknown>): QzoneComment {
     ...(replyToCommentId && { replyToCommentId }),
     ...(parentCommentId && { parentCommentId }),
     ...(pic && pic.length > 0 && { pic }),
+    ...(feeds3ParseSeq != null && { feeds3ParseSeq }),
   };
 }
 
-function normalizeLike(raw: Record<string, unknown>): QzoneLike {
+export function normalizeLike(raw: Record<string, unknown>): QzoneLike {
   const uin = String(raw['uin'] ?? raw['fuin'] ?? '');
   const nickname = stripHtml(String(raw['name'] ?? raw['nick'] ?? ''));
   const createdTime = safeInt(raw['time'] ?? raw['likeTime'] ?? 0);
@@ -477,6 +482,8 @@ export class EventPoller {
   private lastError = 0;
   private backoff = 0;
   private statusOk = false;
+  /** 防抖写入 seen_interactive_state.json，避免每帖一次写盘 */
+  private interactiveSaveTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(
     private readonly client: QzoneClient,
@@ -521,6 +528,76 @@ export class EventPoller {
     this.saveSeenTids();
   }
 
+  private get interactiveStateFile(): string {
+    return join(this.config.cachePath, 'seen_interactive_state.json');
+  }
+
+  /** 重启后恢复已见评论/点赞与计数，避免把历史当成新事件重复推送 */
+  private loadInteractiveState(): void {
+    try {
+      const raw = readFileSync(this.interactiveStateFile, 'utf-8');
+      const o = JSON.parse(raw) as {
+        v?: number;
+        comments?: Record<string, string[]>;
+        likes?: Record<string, string[]>;
+        counts?: Record<string, { comment: number; like: number }>;
+      };
+      if (o.comments) {
+        for (const [tid, ids] of Object.entries(o.comments)) {
+          if (!ids?.length) continue;
+          if (!this.seenCommentIds.has(tid)) this.seenCommentIds.set(tid, new Set());
+          for (const id of ids) this.seenCommentIds.get(tid)!.add(id);
+        }
+      }
+      if (o.likes) {
+        for (const [tid, uins] of Object.entries(o.likes)) {
+          if (!uins?.length) continue;
+          if (!this.seenLikeUins.has(tid)) this.seenLikeUins.set(tid, new Set());
+          for (const u of uins) this.seenLikeUins.get(tid)!.add(u);
+        }
+      }
+      if (o.counts) {
+        for (const [tid, c] of Object.entries(o.counts)) {
+          const comment = Math.max(0, Number(c?.comment) || 0);
+          const like = Math.max(0, Number(c?.like) || 0);
+          this.knownCounts.set(tid, { comment, like });
+        }
+      }
+    } catch { /* 首次运行或文件不存在 */ }
+  }
+
+  private flushInteractiveStateToDisk(): void {
+    try {
+      mkdirSync(this.config.cachePath, { recursive: true });
+      const comments: Record<string, string[]> = {};
+      for (const [tid, set] of this.seenCommentIds) {
+        if (set.size > 0) comments[tid] = [...set];
+      }
+      const likes: Record<string, string[]> = {};
+      for (const [tid, set] of this.seenLikeUins) {
+        if (set.size > 0) likes[tid] = [...set];
+      }
+      const counts: Record<string, { comment: number; like: number }> = {};
+      for (const [tid, c] of this.knownCounts) {
+        counts[tid] = { comment: c.comment, like: c.like };
+      }
+      const payload = { v: 1 as const, comments, likes, counts };
+      const tmp = `${this.interactiveStateFile}.tmp`;
+      writeFileSync(tmp, JSON.stringify(payload), 'utf-8');
+      renameSync(tmp, this.interactiveStateFile);
+    } catch (e) {
+      console.error('[Poller] flushInteractiveStateToDisk failed:', e);
+    }
+  }
+
+  private requestInteractiveStateSave(): void {
+    if (this.interactiveSaveTimer) clearTimeout(this.interactiveSaveTimer);
+    this.interactiveSaveTimer = setTimeout(() => {
+      this.interactiveSaveTimer = null;
+      this.flushInteractiveStateToDisk();
+    }, 1500);
+  }
+
   private isPostSeenItem(item: NormalizedItem, raw: Record<string, unknown>): boolean {
     if (!item.tid || !item.uin) return true;
     return seenLookupKeysForPost(item, raw).some((k) => this.seenPostTids.has(k));
@@ -531,6 +608,7 @@ export class EventPoller {
     this.running = true;
     // 加载持久化的已见 tid，防止重启后重复推送
     this.loadSeenTids();
+    this.loadInteractiveState();
     // add seeded tids
     for (const tid of this.hub.getSeedTids()) this.trackTids.add(tid);
 
@@ -556,6 +634,11 @@ export class EventPoller {
     if (this.friendFeedTimer) { clearTimeout(this.friendFeedTimer); this.friendFeedTimer = null; }
     if (this.keepaliveTimer) { clearInterval(this.keepaliveTimer); this.keepaliveTimer = null; }
     if (this.heartbeatTimer) { clearInterval(this.heartbeatTimer); this.heartbeatTimer = null; }
+    if (this.interactiveSaveTimer) {
+      clearTimeout(this.interactiveSaveTimer);
+      this.interactiveSaveTimer = null;
+    }
+    this.flushInteractiveStateToDisk();
   }
 
   // ── 独立定时器调度 ──────────────────────────────
@@ -592,6 +675,7 @@ export class EventPoller {
         await Promise.all([...this.trackTids].map(tid =>
           limit(() => safePoll(`comments/${tid.slice(0, 8)}`, () => this.pollComments(selfId, tid))),
         ));
+        this.requestInteractiveStateSave();
       }
       this.scheduleComments(this.addJitter(this.config.commentPollInterval * 1000));
     }, delayMs);
@@ -606,6 +690,7 @@ export class EventPoller {
         await Promise.all([...this.trackTids].map(tid =>
           limit(() => safePoll(`likes/${tid.slice(0, 8)}`, () => this.pollLikes(selfId, tid))),
         ));
+        this.requestInteractiveStateSave();
       }
       this.scheduleLikes(this.addJitter(this.config.likePollInterval * 1000));
     }, delayMs);
@@ -788,6 +873,7 @@ export class EventPoller {
     }
 
     this._pruneTrackingDicts(items.map(i => i.tid).filter((t): t is string => t !== null));
+    this.requestInteractiveStateSave();
   }
 
   private async pollFriendFeeds(): Promise<void> {
@@ -827,6 +913,7 @@ export class EventPoller {
         }
       }
     } catch { /* skip */ }
+    this.requestInteractiveStateSave();
   }
 
   private cacheNormalizedItem(item: NormalizedItem): void {
@@ -877,10 +964,11 @@ export class EventPoller {
         const comment = normalizeComment(raw);
         if (!comment.commentId) continue;
         if (!this.seenCommentIds.has(tid)) this.seenCommentIds.set(tid, new Set());
-        const isNew = !this.seenCommentIds.get(tid)!.has(comment.commentId);
-        this.logEventDebug(`[Poller:DEBUG] comment id=${comment.commentId.slice(0,16)}, isNew=${isNew}`);
+        const seenSet = this.seenCommentIds.get(tid)!;
+        const isNew = !commentDedupSeen(seenSet, tid, comment);
+        this.logEventDebug(`[Poller:DEBUG] comment id=${comment.commentId.slice(0, 16)}, isNew=${isNew}`);
         if (isNew) {
-          this.seenCommentIds.get(tid)!.add(comment.commentId);
+          commentDedupMark(seenSet, tid, comment);
           // 本人发的评论不推送：否则 Bot 自动回复 → 产生新评论 → 再推送 → 死循环
           if (String(comment.uin) === String(selfUin)) {
             this.logEventDebug(`[Poller:DEBUG] skip publish own comment id=${comment.commentId.slice(0, 16)}`);
