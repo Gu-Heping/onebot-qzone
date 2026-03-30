@@ -322,7 +322,7 @@ npm run build:plugin
 npm run dev              # 开发模式运行
 npm run build            # 编译主项目
 npm run build:plugin     # 编译 NapCat 插件
-npm run test             # 运行单元测试（127 项）
+npm run test             # 运行单元测试（153 项，16 套件）
 npm run test:unit        # 同上
 npm run test:api         # 单元 + API 集成测试
 npm run test:api:readonly # 单元 + 只读 API 测试
@@ -337,7 +337,7 @@ npm run catch-up-seen    # 真实接口回填 seen_post + seen_interactive_state
 
 ### 测试说明
 
-- **单元测试**：`test/unit/` 下 10 个测试套件，共 127 项，纯本地运行不需要登录。
+- **单元测试**：`test/unit/` 下 16 个测试套件，共 153 项，纯本地运行不需要登录。
 - **API 测试**：需先启动 bridge 并登录，`--readonly` 模式仅验证读接口。
 - **端点健康检查**：`scripts/verify-endpoints.ts`，启动即检验 8 个读 + 2 个写端点，输出彩色 PASS/FAIL/SKIP 报告。
 - **真实数据导出（人工核对）**：`scripts/dump-friend-feeds-once.ts` → `feeds_manual_dump.json`；`scripts/dump-comments-for-feeds-once.ts` → `comments_manual_dump.json`（按动态 `tid`/`uin` 调 `getCommentsBestEffort`，feeds3 评论；仅当该帖在拉取到的好友流 HTML 里**嵌了评论区**时才有条目）。
@@ -386,7 +386,7 @@ src/
 │   ├── cookieStore.ts     # Cookie 持久化
 │   ├── client.ts          # QzoneClient 主类（登录 + 全部 API）
 │   ├── feeds3Parser.ts    # Barrel：feeds3 解析聚合导出
-│   ├── feeds3/            # feeds3 子模块（预处理/正文/说说/评论/点赞/元数据/辅助）
+│   ├── feeds3/            # feeds3 子模块（预处理/正文/说说/评论/点赞/元数据/TID归一/辅助）
 │   ├── schemas.ts         # Zod 运行时校验 Schema（10 套）
 │   ├── validate.ts        # 校验入口（validateApiResponse / validateOrThrow）
 │   ├── requestLayer.ts    # 统一请求层（JSONP 拆包 / 反爬检测 / 业务码提取）
@@ -404,25 +404,43 @@ napcat-plugin/
 └── src/index.ts           # NapCat 原生插件
 
 scripts/
-└── verify-endpoints.ts    # 端点健康检查脚本
+├── verify-endpoints.ts          # 端点健康检查脚本
+├── verify-bridge-http.ts        # HTTP 登录/昵称抽检
+├── verify-all-qzone-tools-http.ts # OpenClaw 工具全量 HTTP 对齐
+├── probe-doc-endpoints.ts       # 探测接口可用性并写入文档
+├── catch-up-seen-state.ts       # 回填 seen 状态缓存
+├── dump-friend-feeds-once.ts    # 真实数据导出（好友动态）
+├── dump-comments-for-feeds-once.ts # 真实数据导出（评论）
+├── dump-html-vs-parse-audit.ts  # HTML vs 解析结果对比审计
+├── inspect-feed-html-slice.ts   # 单条 HTML 片段调试
+└── verify-feeds3-comments-alignment.ts # feeds3 评论对齐验证
 
 test/
 ├── run-all.ts             # 测试运行器
 ├── test-helpers.ts        # 测试工具函数
 ├── api-interfaces.ts      # API 集成测试
-└── unit/                  # 单元测试（10 套件，127 项）
+└── unit/                  # 单元测试（16 套件，153 项）
 
 doc/                       # QZone 逆向分析文档
+├── README.md              # 文档索引
 ├── api-overview.md        # API 总览
+├── api-probe-results.md   # 接口探测结果（-10000/500/404 等）
 ├── auth.md                # 认证机制
-├── emotion-api.md         # 说说接口
-├── social-api.md          # 社交互动接口
-├── feeds3-parser.md       # feeds3 HTML 解析（含视频/二级回复/艾特）
+├── board-api.md           # 留言板接口
+├── compatibility-matrix.md # 接口可用性矩阵
 ├── deep-reverse-findings.md # 深度逆向发现汇总
+├── emotion-api.md         # 说说接口
+├── social-api.md          # 社交互动接口（评论/点赞/转发）
+├── feeds3-parser.md       # feeds3 HTML 解析（含视频/二级回复/艾特）
 ├── photo-api.md           # 相册/照片接口
 ├── user-api.md            # 用户信息接口
 ├── fallback-strategy.md   # 降级策略
-└── compatibility-matrix.md # 接口可用性矩阵
+├── qzone-feature-matrix.md # 功能矩阵
+├── qzone-specified-user-diagnosis.md # 指定用户诊断
+├── reverse-engineering-guide.md # 逆向工程指南
+├── openclaw-acceptance.md # OpenClaw 验收清单
+├── feature-backlog.md     # 功能待办
+└── 获取说说流程说明.md    # 中文流程说明
 ```
 
 ---
