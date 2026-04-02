@@ -257,16 +257,12 @@ QZONE_PLAYWRIGHT_HEADLESS=1 npm run dev
 | `get_comment_list` | 获取评论列表 | `user_id`, `tid` |
 | `send_like` | 点赞说说 | `user_id`, `tid`, `abstime` |
 | `unlike` | 取消点赞 | `user_id`, `tid`, `abstime` |
-| `get_like_list` | 获取点赞列表（基础版） | `user_id`, `tid` |
-  - 依赖说说详情接口，简单直接但可能被限流
-| `get_like_list_best_effort` | 获取点赞列表（推荐） | `user_id`, `tid` |
-  - **多级降级**：PC detail → Mobile detail → feeds3 HTML → 空数组
-  - 带缓存机制，自动跨 scope 拉取，可靠性更高
-  - 事件推送可带完整点赞者详情（QQ、昵称、时间、个性赞图标）
-| `get_video_info` | 获取视频元数据 | `tid`（从 h5-json 解析 video 字段：MP4/封面/时长/尺寸） |
-| `parse_mentions` | 解析艾特用户 | 支持 `@{uin:QQ,nick:昵称,who:1,auto:1}` 格式，自动提取并转换表情 |
-| `parse_emojis` | 解析表情 | 将 `[em]e100[/em]` 转换为 `[微笑]` 等可读名称，支持 150+ 常用表情 |
-| `get_device_info` | 获取设备信息 | `tid`（如 "Xiaomi 15 Pro"、终端类型） |
+| `get_like_list` | 获取点赞列表（基础版）<br>依赖说说详情接口，简单直接但可能被限流 | `user_id`, `tid` |
+| `get_like_list_best_effort` | 获取点赞列表（推荐）<br>**多级降级**：PC detail → Mobile detail → feeds3 HTML → 空数组<br>带缓存机制，自动跨 scope 拉取，可靠性更高<br>事件推送可带完整点赞者详情（QQ、昵称、时间、个性赞图标） | `user_id`, `tid` |
+| `get_video_info` | 获取视频元数据<br>从 h5-json 解析 video 字段：MP4/封面/时长/尺寸 | `tid` |
+| `parse_mentions` | 解析艾特用户<br>支持 `@{uin:QQ,nick:昵称,who:1,auto:1}` 格式，自动提取并转换表情 | — |
+| `parse_emojis` | 解析表情<br>将 `[em]e100[/em]` 转换为 `[微笑]` 等可读名称，支持 150+ 常用表情 | — |
+| `get_device_info` | 获取设备信息<br>如 "Xiaomi 15 Pro"、终端类型 | `tid` |
 | `forward_msg` | 转发说说 | `user_id`, `tid`, `content` |
 | `get_friend_list` | 获取好友列表 | — |
 | `get_stranger_info` | 获取用户信息 | `user_id` |
@@ -274,11 +270,11 @@ QZONE_PLAYWRIGHT_HEADLESS=1 npm run dev
 | `get_traffic_data` | 获取说说流量统计 | `user_id`, `tid` |
 | `set_emotion_privacy` | 设置说说隐私 | `tid`, `privacy`（`private`/`public`） |
 | `get_portrait` | 获取头像和昵称 | `user_id` |
-| `get_friend_feeds` | 获取好友动态流（feeds3，游标分页） | `cursor`、`num`/`count`；`fast_mode` 默认 `1`；含好友与 HTML 中出现的本人动态；含 appid=311/202 等（排除 217 等噪音）；默认附带图片 base64（`include_image_data=false` 可关闭） |
+| `get_friend_feeds` | 获取好友动态流（feeds3，游标分页）<br>`cursor`/`num`/`count`；`fast_mode` 默认 `1`<br>含好友与 HTML 中出现的本人动态；含 appid=311/202 等（排除 217 等噪音）<br>默认附带图片 base64（`include_image_data=false` 可关闭） | — |
 | `get_album_list` | 获取相册列表 | `user_id`（可选） |
 | `get_photo_list` | 获取照片列表 | `album_id` |
 | `upload_image` | 上传图片 | `base64` 或 `url` |
-| `fetch_image` | 使用桥接 Cookie 拉取 QZone 图片（返回 base64） | `url` 或 `urls`；仅接受白名单域名（qpic.cn、photo.store.qq.com、qzonestyle.gtimg.cn），边缘场景用 |
+| `fetch_image` | 使用桥接 Cookie 拉取 QZone 图片（返回 base64）<br>仅接受白名单域名（qpic.cn、photo.store.qq.com、qzonestyle.gtimg.cn） | `url` 或 `urls` |
 | `probe_api_routes` | 探测可用接口路由 | `uin`, `tid` |
 | `reset_api_caches` | 清除接口缓存 | — |
 | `login_cookie` | Cookie 登录 | `cookie` |
