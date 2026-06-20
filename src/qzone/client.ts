@@ -17,12 +17,32 @@ import {
   htmlUnescape,
 } from './utils.js';
 import { saveCookies, loadCookies, deleteCookies } from './cookieStore.js';
-import type { ApiResponse, NormalizedItem, PostMeta, UploadImageResult, Routes } from './types.js';
+import type {
+  ApiResponse,
+  BestEffortAvailability,
+  BestEffortOptions,
+  CapabilityReport,
+  CapabilityStatus,
+  DiagnosticRef,
+  NormalizedItem,
+  PostIdentity,
+  PostMeta,
+  Routes,
+  SdkFailure,
+  SdkFailureKind,
+  SdkReliability,
+  SdkResult,
+  SdkSource,
+  SdkSuccess,
+  PlaywrightFeedSnapshot,
+  StrictOptions,
+  UploadImageResult,
+} from './types.js';
 import { parseRawResponse, isGenuineSuccess, type ParsedApiResult } from './requestLayer.js';
 import { validateApiResponse } from './validate.js';
 import type { SchemaName } from './schemas.js';
 import {
-  CACHE_TTL, AUTH_FAILURE_CODES, USER_AGENTS,
+  CACHE_TTL, AUTH_FAILURE_CODES, RATE_LIMIT_CODES, USER_AGENTS,
   getRandomUserAgent, getRandomAcceptLanguage,
 } from './config/constants.js';
 import { env } from './config/env.js';
@@ -40,6 +60,18 @@ import { convertNamesToEmojis } from './emoji.js';
 
 const PUBLISH_IMAGE_UPLOAD_CONCURRENCY = 3;
 const UPLOAD_IMAGE_RETRY_COUNT = 2;
+
+type AxiosProxyConfig = NonNullable<AxiosRequestConfig['proxy']>;
+
+class Feeds3BusinessError extends Error {
+  payload: ApiResponse;
+
+  constructor(payload: ApiResponse) {
+    super(String(payload.message ?? payload.msg ?? 'feeds3 business failure'));
+    this.name = 'Feeds3BusinessError';
+    this.payload = payload;
+  }
+}
 
 // ──────────────────────────────────────────────
 // fetchImageWithAuth 辅助
@@ -77,12 +109,15 @@ function stripProxyHeaders(headers: Record<string, string>): Record<string, stri
   return out;
 }
 
-function buildProxyFromUrl(proxyUrl: string): { protocol: string; host: string; port: number; auth?: { username: string; password: string } } {
+function buildProxyFromUrl(proxyUrl: string): AxiosProxyConfig {
   const u = new URL(proxyUrl);
-  const result: { protocol: string; host: string; port: number; auth?: { username: string; password: string } } = {
+  if (!['http:', 'https:'].includes(u.protocol)) {
+    throw new Error(`unsupported proxy protocol: ${u.protocol}`);
+  }
+  const result: AxiosProxyConfig = {
     protocol: u.protocol.replace(':', ''),
     host: u.hostname,
-    port: Number(u.port),
+    port: Number(u.port || (u.protocol === 'https:' ? 443 : 80)),
   };
   if (u.username) {
     result.auth = {
@@ -117,12 +152,23 @@ function sleepMs(ms: number): Promise<void> {
 // ──────────────────────────────────────────────
 export interface QzoneConfig {
   cachePath: string;
+  proxyUrl?: string;
+  proxyPool?: string[];
   /** 仅图片拉取走代理（如 http://127.0.0.1:7890），未设置则直连 */
   imageProxyUrl?: string;
 }
 
 function defaultConfig(cfg?: Partial<QzoneConfig>): QzoneConfig {
-  return { cachePath: './test_cache', ...cfg };
+  return {
+    cachePath: env.cachePath,
+    proxyUrl: env.proxyUrl || undefined,
+    proxyPool: env.proxyPool
+      .split(/[,\r\n]+/)
+      .map(s => s.trim())
+      .filter(Boolean),
+    imageProxyUrl: env.imageProxyUrl || undefined,
+    ...cfg,
+  };
 }
 
 // ──────────────────────────────────────────────
@@ -136,6 +182,7 @@ export class QzoneClient {
 
   private jar: CookieJar;
   private http: AxiosInstance;
+  private proxyCursor = 0;
 
   // caches
   private qzonetokenCache: string | null = null;
@@ -153,6 +200,7 @@ export class QzoneClient {
   private feeds3Cache: Map<string, string> = new Map();
   private feeds3CacheTime: Map<string, number> = new Map();
   private feeds3CacheTtl = CACHE_TTL.feeds3;
+  private lastFeeds3BusinessFailure: ApiResponse | null = null;
 
   /** feeds3 HTML 中解析出的评论：postTid → comment records（每次 getEmotionListViaFeeds3 刷新） */
   feeds3Comments = new Map<string, Record<string, unknown>[]>();
@@ -160,6 +208,7 @@ export class QzoneClient {
 
   /** feeds3 HTML 中解析出的点赞：postTid → Feeds3Like[]（每次 getEmotionListViaFeeds3 刷新） */
   feeds3Likes = new Map<string, Feeds3Like[]>();
+  private feeds3LikesFetchedAt = new Map<string, number>();
 
   /**
    * 帖子元数据缓存：tid → { uin, appid, typeid, likeUnikey, likeCurkey, abstime }
@@ -204,10 +253,135 @@ export class QzoneClient {
     }
   }
 
+  private normalizeFeeds3LikesForTool(likes: Feeds3Like[]): Array<Record<string, unknown>> {
+    return likes.map(l => ({
+      uin: l.uin,
+      name: l.nickname,
+      time: l.abstime,
+      customItemId: l.customItemId,
+      _source: 'feeds3_html',
+    }));
+  }
+
+  private mergeFeeds3Likes(
+    likesByTid: Map<string, Feeds3Like[]>,
+    fetchedAt = Math.floor(Date.now() / 1000),
+  ): void {
+    for (const [postTid, likes] of likesByTid) {
+      const existing = this.feeds3Likes.get(postTid);
+      if (existing) {
+        const byUin = new Map(existing.map(l => [l.uin, l] as const));
+        for (const like of likes) {
+          const cur = byUin.get(like.uin);
+          if (!cur || like.abstime >= cur.abstime) byUin.set(like.uin, like);
+        }
+        const merged = [...byUin.values()];
+        this.feeds3Likes.set(postTid, merged);
+        this.feeds3LikesCache.set(postTid, this.normalizeFeeds3LikesForTool(merged));
+      } else {
+        this.feeds3Likes.set(postTid, [...likes]);
+        this.feeds3LikesCache.set(postTid, this.normalizeFeeds3LikesForTool(likes));
+      }
+      this.feeds3LikesFetchedAt.set(postTid, fetchedAt);
+    }
+  }
+
+  private mergeFeeds3AncillaryFromHtml(
+    htmlText: string,
+    fetchedAt = Math.floor(Date.now() / 1000),
+    source = 'feeds3',
+  ): void {
+    try {
+      this.mergeFeeds3Comments(_parseFeeds3Comments(htmlText), fetchedAt);
+    } catch (e) {
+      log('WARN', `${source}: parseFeeds3Comments failed: ${e}`);
+    }
+    try {
+      this.mergeFeeds3Likes(_parseFeeds3Likes(htmlText), fetchedAt);
+    } catch (e) {
+      log('WARN', `${source}: parseFeeds3Likes failed: ${e}`);
+    }
+  }
+
   private commentCacheAgeSeconds(tid: string): number | null {
     const fetchedAt = this.feeds3CommentsFetchedAt.get(tid);
     if (fetchedAt == null) return null;
     return Math.max(0, Math.floor(Date.now() / 1000) - fetchedAt);
+  }
+
+  private extractDetailTidFromTopicId(topicId: string): string {
+    const match = String(topicId ?? '').match(/^\d+_([a-z0-9]+)__\d+$/i);
+    return match?.[1] ?? '';
+  }
+
+  private collectPostEntityKeys(canonicalTid: string): string[] {
+    const keys = new Set<string>();
+    if (canonicalTid) keys.add(canonicalTid);
+    const meta = this.postMetaCache.get(canonicalTid);
+    if (!meta) return [...keys];
+    if (meta.detailTid) keys.add(meta.detailTid);
+    if (meta.topicId) {
+      keys.add(meta.topicId);
+      const topicDetailTid = this.extractDetailTidFromTopicId(meta.topicId);
+      if (topicDetailTid) keys.add(topicDetailTid);
+    }
+    if (meta.sourceFkey) keys.add(meta.sourceFkey);
+    if (meta.abstime > 0) {
+      keys.add(String(meta.abstime));
+      if (meta.uin) keys.add(`d${meta.uin}_${meta.abstime}_`);
+    }
+    if (meta.detailUrl) keys.add(meta.detailUrl);
+    if (meta.likeUnikey) keys.add(meta.likeUnikey);
+    if (meta.likeCurkey) keys.add(meta.likeCurkey);
+    return [...keys];
+  }
+
+  private selectFeeds3AliasSourceKey<T>(
+    canonicalTid: string,
+    buckets: Map<string, T[]>,
+    label: string,
+  ): string | null {
+    if (!canonicalTid || buckets.has(canonicalTid)) return null;
+    const meta = this.postMetaCache.get(canonicalTid);
+    const authorUin = meta?.uin?.trim() ?? '';
+    const detailTid = meta?.detailTid?.trim() ?? '';
+    const topicDetailTid = this.extractDetailTidFromTopicId(meta?.topicId ?? '');
+    const sourceFkey = meta?.sourceFkey?.trim() ?? '';
+    const detailUrl = meta?.detailUrl?.trim() ?? '';
+    const abstime = meta?.abstime;
+    const asStr = abstime != null && abstime > 0 ? String(abstime) : '';
+    const embedded = asStr ? `_${asStr}_` : '';
+    const preferredPrefix = authorUin && asStr ? `d${authorUin}_${asStr}_` : '';
+    const candidates: Array<{ key: string; score: number }> = [];
+    for (const [key, list] of buckets) {
+      if (!list?.length || key === canonicalTid) continue;
+      const keyTrimmed = key.trim();
+      const matchesAbstime = Boolean(asStr) && (keyTrimmed === asStr || keyTrimmed.includes(embedded));
+      const matchesDetailTid = Boolean(detailTid) && keyTrimmed === detailTid;
+      const matchesTopicTid = Boolean(topicDetailTid) && keyTrimmed === topicDetailTid;
+      const matchesSourceFkey = Boolean(sourceFkey) && keyTrimmed === sourceFkey;
+      const matchesDetailUrl = Boolean(detailUrl) && keyTrimmed === detailUrl;
+      if (!(matchesAbstime || matchesDetailTid || matchesTopicTid || matchesSourceFkey || matchesDetailUrl)) continue;
+      if (authorUin && keyTrimmed.startsWith('d') && !keyTrimmed.startsWith(`d${authorUin}_`)) continue;
+      let score = 0;
+      if (matchesDetailTid) score += 8;
+      if (matchesTopicTid) score += 7;
+      if (matchesSourceFkey) score += 6;
+      if (matchesDetailUrl) score += 5;
+      if (preferredPrefix && keyTrimmed.startsWith(preferredPrefix)) score += 4;
+      else if (authorUin && keyTrimmed.startsWith(`d${authorUin}_`)) score += 2;
+      if (matchesAbstime && keyTrimmed === asStr) score += 3;
+      else if (matchesAbstime) score += 1;
+      candidates.push({ key, score });
+    }
+    if (candidates.length === 0) return null;
+    candidates.sort((a, b) => b.score - a.score || a.key.localeCompare(b.key));
+    const best = candidates[0]!;
+    if (candidates.length > 1 && candidates[1]!.score === best.score) {
+      log('WARNING', `${label}: skip ${canonicalTid}, matched multiple candidate buckets with same score`);
+      return null;
+    }
+    return best.key;
   }
 
   /**
@@ -219,30 +393,12 @@ export class QzoneClient {
    * 现逻辑：先按作者 uin 收窄 `d{uin}_` 前缀桶；若仍有多候选则**放弃别名**（宁缺勿滥）。
    */
   private aliasFeeds3CommentsToCanonicalTid(canonicalTid: string): void {
-    if (!canonicalTid || this.feeds3Comments.has(canonicalTid)) return;
-    const meta = this.postMetaCache.get(canonicalTid);
-    const abstime = meta?.abstime;
-    const authorUin = meta?.uin?.trim() ?? '';
-    if (abstime == null || abstime <= 0) return;
-    const asStr = String(abstime);
-    const embedded = `_${asStr}_`;
-    const candidates: string[] = [];
-    for (const [k, cmts] of this.feeds3Comments) {
-      if (!cmts?.length || k === canonicalTid) continue;
-      if (!(k.includes(embedded) || k === asStr)) continue;
-      if (authorUin && k.startsWith('d') && !k.startsWith(`d${authorUin}_`)) continue;
-      candidates.push(k);
-    }
-    if (candidates.length !== 1) {
-      if (candidates.length > 1) {
-        log(
-          'WARNING',
-          `aliasFeeds3CommentsToCanonicalTid: 跳过 ${canonicalTid}，abstime=${asStr} 匹配到 ${candidates.length} 个评论桶（可能同秒多帖），避免串帖`,
-        );
-      }
-      return;
-    }
-    const bestKey = candidates[0]!;
+    const bestKey = this.selectFeeds3AliasSourceKey(
+      canonicalTid,
+      this.feeds3Comments,
+      'aliasFeeds3CommentsToCanonicalTid',
+    );
+    if (!bestKey) return;
     const cmts = this.feeds3Comments.get(bestKey)!;
     this.feeds3Comments.set(canonicalTid, cmts);
     const ft = this.feeds3CommentsFetchedAt.get(bestKey);
@@ -257,6 +413,20 @@ export class QzoneClient {
    * 若传入的 tid 实为 abstime（纯数字），用 postMetaCache 反查对应的 key（hex tid），
    * 评论接口 PC/mobile 需要 key 格式，用 abstime 会返回空或 -3。
    */
+  private aliasFeeds3LikesToCanonicalTid(canonicalTid: string): void {
+    const bestKey = this.selectFeeds3AliasSourceKey(canonicalTid, this.feeds3Likes, 'aliasFeeds3LikesToCanonicalTid');
+    if (!bestKey) return;
+    const likes = this.feeds3Likes.get(bestKey)!;
+    this.feeds3Likes.set(canonicalTid, likes);
+    this.feeds3LikesCache.set(canonicalTid, this.feeds3LikesCache.get(bestKey) ?? this.normalizeFeeds3LikesForTool(likes));
+    const ft = this.feeds3LikesFetchedAt.get(bestKey);
+    if (ft != null) this.feeds3LikesFetchedAt.set(canonicalTid, ft);
+    log(
+      'DEBUG',
+      `aliasFeeds3LikesToCanonicalTid: ${canonicalTid} <- ${bestKey.length > 56 ? `${bestKey.slice(0, 56)}...` : bestKey}`,
+    );
+  }
+
   resolveTidForComments(tid: string): string {
     if (!tid || !/^\d+$/.test(tid)) return tid;
     const abstime = Number(tid);
@@ -279,7 +449,26 @@ export class QzoneClient {
     const likeUnikey = String(item['likeUnikey'] ?? '');
     const likeCurkey = String(item['likeCurkey'] ?? '');
     const abstime = Number(item['created_time'] ?? item['createTime'] ?? 0);
-    this.cachePostMeta(tid, { uin, appid, typeid, likeUnikey, likeCurkey, abstime });
+    const topicId = String(item['topicId'] ?? '');
+    const detailTid = String(item['detailTid'] ?? '');
+    const detailUrl = String(item['detailUrl'] ?? '');
+    const sourceFkey = String(item['sourceFkey'] ?? '');
+    const cmtnum = Number(item['cmtnum'] ?? 0);
+    const likenum = Number(item['likenum'] ?? 0);
+    this.cachePostMeta(tid, {
+      uin,
+      appid,
+      typeid,
+      likeUnikey,
+      likeCurkey,
+      abstime,
+      topicId: topicId || undefined,
+      detailTid: detailTid || undefined,
+      detailUrl: detailUrl || undefined,
+      sourceFkey: sourceFkey || undefined,
+      cmtnum: Number.isFinite(cmtnum) ? cmtnum : undefined,
+      likenum: Number.isFinite(likenum) ? likenum : undefined,
+    });
   }
 
   /** msglist 条目的 tid / cellid 与目标 tid 匹配（避免 string/number 严格 === 漏匹配） */
@@ -321,6 +510,15 @@ export class QzoneClient {
 
   /** 好友缓存：uin -> { uin, nickname, avatar, lastSeen }，持久化到 friends.json */
   private friendCache: Map<string, { uin: string; nickname: string; avatar: string; lastSeen: number }> = new Map();
+  private playwrightFeedBrowser: any | null = null;
+  private playwrightFeedContext: any | null = null;
+  private playwrightFeedPage: any | null = null;
+  private readonly playwrightFeedPosts = new Map<string, Record<string, unknown>>();
+  private readonly playwrightFeedPendingParses = new Set<Promise<void>>();
+  private playwrightFeedListenerAttached = false;
+  private playwrightFeedDomFallbackUsed = false;
+  private playwrightFeedNetworkIntercepted = false;
+  private playwrightFeedInterceptedResponseCount = 0;
 
   routes: Routes = {
     comments: 'pc',
@@ -336,6 +534,10 @@ export class QzoneClient {
       timeout: 20000,
       maxRedirects: 5,
       validateStatus: () => true,  // 不抛出 HTTP 错误
+    });
+    baseInstance.interceptors.request.use((requestConfig) => {
+      requestConfig.proxy = this.resolveAxiosProxy(requestConfig.proxy);
+      return requestConfig;
     });
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     this.http = wrapper(baseInstance as any) as AxiosInstance;
@@ -505,6 +707,27 @@ export class QzoneClient {
   // ──────────────────────────────────────────────
   // HTTP 封装
   // ──────────────────────────────────────────────
+  private getProxyCandidates(): string[] {
+    if (Array.isArray(this.config.proxyPool) && this.config.proxyPool.length > 0) {
+      return this.config.proxyPool.filter(Boolean);
+    }
+    return this.config.proxyUrl ? [this.config.proxyUrl] : [];
+  }
+
+  private nextProxyUrl(): string | null {
+    const proxies = this.getProxyCandidates();
+    if (proxies.length === 0) return null;
+    const index = this.proxyCursor % proxies.length;
+    this.proxyCursor = (this.proxyCursor + 1) % proxies.length;
+    return proxies[index] ?? null;
+  }
+
+  private resolveAxiosProxy(currentProxy: AxiosRequestConfig['proxy']): AxiosRequestConfig['proxy'] {
+    if (currentProxy === false || currentProxy) return currentProxy;
+    const proxyUrl = this.nextProxyUrl();
+    return proxyUrl ? buildProxyFromUrl(proxyUrl) : false;
+  }
+
   async request(
     method: 'GET' | 'POST',
     url: string,
@@ -598,7 +821,7 @@ export class QzoneClient {
     if (this.config.imageProxyUrl) {
       requestConfig.proxy = buildProxyFromUrl(this.config.imageProxyUrl);
     } else {
-      requestConfig.proxy = false;
+      requestConfig.proxy = this.resolveAxiosProxy(undefined);
     }
     const httpClient = axios.create({
       timeout: 15000,
@@ -753,7 +976,52 @@ export class QzoneClient {
 
   isAuthFailure(payload: ApiResponse): boolean {
     const code = payload.code as number | undefined;
-    return code !== undefined && AUTH_FAILURE_CODES.has(code);
+    const subcode = Number(payload.subcode ?? 0);
+    const message = this.describeApiFailure(payload).toLowerCase();
+    if (code !== undefined && AUTH_FAILURE_CODES.has(code)) return true;
+    if (subcode === -4001) return true;
+    return /need\s+login|请先登录|需要登录|未登录|登录后/i.test(message);
+  }
+
+  private describeApiFailure(payload: ApiResponse): string {
+    const parts = [
+      typeof payload.message === 'string' ? payload.message.trim() : '',
+      typeof payload.msg === 'string' ? payload.msg.trim() : '',
+      typeof payload['tips'] === 'string' ? String(payload['tips']).trim() : '',
+    ].filter(Boolean);
+    return parts.join(' | ');
+  }
+
+  private getApiFailureKind(payload: ApiResponse): SdkFailureKind {
+    if (this.isAuthFailure(payload)) return 'auth';
+    if (RATE_LIMIT_CODES.has(Number(payload.code ?? 0))) return 'rate_limit';
+    return 'upstream_changed';
+  }
+
+  private extractFeeds3BusinessFailure(respText: string): ApiResponse | null {
+    try {
+      const parsed = parseJsonp(respText) as ApiResponse;
+      if (!parsed || typeof parsed !== 'object') return null;
+      const code = Number(parsed.code);
+      const hasBusinessCode = Number.isFinite(code) && code !== 0;
+      const needsLogin = this.isAuthFailure(parsed);
+      if (!hasBusinessCode && !needsLogin) return null;
+      return {
+        ...parsed,
+        message: String((parsed.message ?? parsed.msg ?? this.describeApiFailure(parsed)) || 'feeds3 business failure'),
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  private extractFeeds3BusinessError(error: unknown): ApiResponse | null {
+    if (error instanceof Feeds3BusinessError) return error.payload;
+    if (error instanceof Error && 'payload' in error) {
+      const payload = (error as Error & { payload?: ApiResponse }).payload;
+      if (payload && typeof payload === 'object') return payload;
+    }
+    return null;
   }
 
   private requireLogin(): void {
@@ -766,6 +1034,116 @@ export class QzoneClient {
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     const ts = new Date().toISOString().replace(/[:.TZ]/g, '').slice(0, 15);
     fs.writeFileSync(path.join(dir, `${name}_${ts}.txt`), content, 'utf8');
+  }
+
+  private ensureDiagnosticDir(category: DiagnosticRef['category']): string {
+    const dir = path.join(this.config.cachePath, 'diagnostics', category);
+    fs.mkdirSync(dir, { recursive: true });
+    return dir;
+  }
+
+  private createDiagnosticRef(
+    category: DiagnosticRef['category'],
+    payload: Record<string, unknown>,
+    preferredId?: string,
+  ): DiagnosticRef {
+    const createdAt = new Date().toISOString();
+    const suffix = Math.random().toString(36).slice(2, 8);
+    const diagnosticId = preferredId ?? `${category}-${Date.now()}-${suffix}`;
+    const dir = this.ensureDiagnosticDir(category);
+    const filePath = path.join(dir, `${diagnosticId}.json`);
+    fs.writeFileSync(filePath, JSON.stringify({ diagnostic_id: diagnosticId, created_at: createdAt, ...payload }, null, 2), 'utf8');
+    return {
+      diagnostic_id: diagnosticId,
+      category,
+      path: filePath,
+      created_at: createdAt,
+    };
+  }
+
+  private sdkSuccess<T>(
+    data: T,
+    source: SdkSource,
+    reliability: SdkReliability,
+    warnings: string[] = [],
+    diagnostic?: DiagnosticRef,
+  ): SdkSuccess<T> {
+    return { ok: true, data, source, reliability, warnings, diagnostic };
+  }
+
+  private sdkFailure(
+    kind: SdkFailureKind,
+    retryable: boolean,
+    reliability: SdkReliability,
+    details: SdkFailure['details'],
+    source?: SdkSource,
+    warnings: string[] = [],
+    diagnostic?: DiagnosticRef,
+  ): SdkFailure {
+    return { ok: false, kind, retryable, reliability, details, source, warnings, diagnostic };
+  }
+
+  private inferSdkSource(raw: unknown, fallback: SdkSource): SdkSource {
+    const source = String(raw ?? '').trim();
+    if (source === 'feeds3' || source === 'feeds3_html' || source === 'feeds3_html_more') return 'feeds3_html';
+    if (source === 'feeds_html_act_all') return 'act_all_html';
+    if (source === 'cache') return 'cache';
+    if (source === 'derived') return 'derived';
+    return fallback;
+  }
+
+  private classifySdkFailure(error: unknown, endpoint: string, uin?: string, tid?: string): SdkFailure {
+    const payload = this.extractFeeds3BusinessError(error);
+    if (payload) {
+      const kind = this.getApiFailureKind(payload);
+      return this.sdkFailure(
+        kind,
+        kind === 'rate_limit',
+        endpoint.includes('Strict') ? 'strict' : 'best_effort',
+        {
+          endpoint,
+          uin,
+          tid,
+          message: this.describeApiFailure(payload) || 'feeds3 request failed',
+        },
+        'feeds3_html',
+      );
+    }
+    const message = error instanceof Error ? error.message : String(error);
+    let kind: SdkFailureKind = 'network';
+    let retryable = true;
+    if (/login|auth|skey|p_skey|未登录/i.test(message)) {
+      kind = 'auth';
+      retryable = false;
+    } else if (/rate|频|too many|限流/i.test(message)) {
+      kind = 'rate_limit';
+    } else if (/not support|unsupported|暂不支持/i.test(message)) {
+      kind = 'not_supported';
+      retryable = false;
+    } else if (/parse|bucket|html/i.test(message)) {
+      kind = 'parse_miss';
+    }
+    return this.sdkFailure(kind, retryable, endpoint.includes('Strict') ? 'strict' : 'best_effort', {
+      endpoint,
+      uin,
+      tid,
+      message,
+    });
+  }
+
+  private buildPostIdentity(tid: string, fallbackUin = ''): PostIdentity {
+    const meta = this.postMetaCache.get(tid);
+    return {
+      canonicalTid: tid,
+      uin: meta?.uin ?? fallbackUin,
+      abstime: meta?.abstime,
+      sourceFkey: meta?.sourceFkey,
+      topicId: meta?.topicId,
+      detailTid: meta?.detailTid,
+      detailUrl: meta?.detailUrl,
+      likeUnikey: meta?.likeUnikey,
+      likeCurkey: meta?.likeCurkey,
+    };
   }
 
   // ──────────────────────────────────────────────
@@ -953,6 +1331,7 @@ export class QzoneClient {
 
   logout(): void {
     this.qqNumber = null;
+    void this.closePlaywrightFeedSession();
     this.deleteCookies();
   }
 
@@ -1129,6 +1508,511 @@ export class QzoneClient {
     this.feeds3Comments.clear();
     this.feeds3CommentsFetchedAt.clear();
     this.feeds3Likes.clear();
+    this.playwrightFeedPosts.clear();
+    this.playwrightFeedDomFallbackUsed = false;
+    this.playwrightFeedNetworkIntercepted = false;
+    this.playwrightFeedInterceptedResponseCount = 0;
+  }
+
+  private async closePlaywrightFeedSession(): Promise<void> {
+    this.playwrightFeedListenerAttached = false;
+    this.playwrightFeedPendingParses.clear();
+    this.playwrightFeedPosts.clear();
+    const context = this.playwrightFeedContext;
+    const browser = this.playwrightFeedBrowser;
+    this.playwrightFeedPage = null;
+    this.playwrightFeedContext = null;
+    this.playwrightFeedBrowser = null;
+    if (context) {
+      try { await context.close(); } catch { /* ignore */ }
+    } else if (browser) {
+      try { await browser.close(); } catch { /* ignore */ }
+    }
+  }
+
+  async closeTransientSessions(): Promise<void> {
+    await this.closePlaywrightFeedSession();
+  }
+
+  private buildPlaywrightCookies(): Array<{ name: string; value: string; domain: string; path: string }> {
+    const cookieArray: Array<{ name: string; value: string; domain: string; path: string }> = [];
+    for (const [name, value] of Object.entries(this.cookies)) {
+      for (const domain of ['.qq.com', '.qzone.qq.com', '.ptlogin2.qq.com']) {
+        cookieArray.push({ name, value, domain, path: '/' });
+      }
+    }
+    return cookieArray;
+  }
+
+  private async syncCookiesFromPlaywrightContext(): Promise<void> {
+    if (!this.playwrightFeedContext) return;
+    const browserCookies = await this.playwrightFeedContext.cookies([
+      'https://qq.com',
+      'https://qzone.qq.com',
+      'https://user.qzone.qq.com',
+      'https://qzs.qzone.qq.com',
+      'https://ptlogin2.qq.com',
+      'https://ssl.ptlogin2.qq.com',
+    ]);
+    let updated = false;
+    for (const cookie of browserCookies) {
+      if (!cookie.value) continue;
+      if (this.cookies[cookie.name] !== cookie.value) updated = true;
+      this.cookies[cookie.name] = cookie.value;
+    }
+    if (updated) {
+      this.jar = new CookieJar();
+      (this.http.defaults as Record<string, unknown>).jar = this.jar;
+      this._syncJarFromMap();
+      this.saveCookies();
+    }
+  }
+
+  private isUsefulPlaywrightFeedItem(item: Record<string, unknown>): boolean {
+    const tid = String(item['tid'] ?? item['cellid'] ?? '').trim();
+    const uin = String(item['uin'] ?? item['opuin'] ?? '').trim();
+    if (!tid || !uin) return false;
+    const appid = Number(item['appid'] ?? 0);
+    return appid !== 217;
+  }
+
+  private playwrightFeedCompleteness(item: Record<string, unknown>): number {
+    let score = 0;
+    if (String(item['tid'] ?? item['cellid'] ?? '').trim()) score += 4;
+    if (String(item['uin'] ?? item['opuin'] ?? '').trim()) score += 4;
+    if (String(item['likeUnikey'] ?? '').trim()) score += 4;
+    if (String(item['likeCurkey'] ?? '').trim()) score += 4;
+    if (String(item['detailUrl'] ?? item['detailurl'] ?? '').trim()) score += 2;
+    if (String(item['nickname'] ?? item['name'] ?? '').trim()) score += 1;
+    if (Number(item['created_time'] ?? item['createTime'] ?? 0) > 0) score += 1;
+    if (Boolean(item['_networkSource'])) score += 3;
+    return score;
+  }
+
+  private mergePlaywrightFeedItem(item: Record<string, unknown>): void {
+    if (!this.isUsefulPlaywrightFeedItem(item)) return;
+    const tid = String(item['tid'] ?? item['cellid'] ?? '').trim();
+    const uin = String(item['uin'] ?? item['opuin'] ?? '').trim();
+    const key = `${uin}:${tid}`;
+    const normalized: Record<string, unknown> = {
+      ...item,
+      uin,
+      tid,
+      _source: 'playwright_feed',
+    };
+    if (!normalized['detailUrl'] && normalized['detailurl']) normalized['detailUrl'] = normalized['detailurl'];
+    if (!normalized['created_time'] && Number(normalized['abstime'] ?? 0) > 0) {
+      normalized['created_time'] = Number(normalized['abstime']);
+    }
+    const current = this.playwrightFeedPosts.get(key);
+    if (!current || this.playwrightFeedCompleteness(normalized) >= this.playwrightFeedCompleteness(current)) {
+      this.playwrightFeedPosts.set(key, normalized);
+    }
+    this.cachePostMetaFromRaw(normalized);
+  }
+
+  private async attachPlaywrightFeedListeners(page: any): Promise<void> {
+    if (this.playwrightFeedListenerAttached) return;
+    this.playwrightFeedListenerAttached = true;
+    page.on('response', (response: any) => {
+      const work = (async () => {
+        try {
+          const url = String(response.url?.() ?? response.url ?? '');
+          if (!/feeds3_html_more|feeds_html_act_all/i.test(url)) return;
+          const text = await response.text();
+          const items = this.parseFeeds3Items(text, undefined, undefined, 120, false);
+          let usefulCount = 0;
+          for (const item of items) {
+            if (!this.isUsefulPlaywrightFeedItem(item)) continue;
+            usefulCount += 1;
+            this.mergePlaywrightFeedItem({ ...item, _networkSource: true });
+          }
+          if (usefulCount > 0) {
+            this.playwrightFeedNetworkIntercepted = true;
+            this.playwrightFeedInterceptedResponseCount += 1;
+            this.mergeFeeds3AncillaryFromHtml(text, Math.floor(Date.now() / 1000), 'playwright_feed');
+            const friends = this.extractFriendsFromFeeds3FromText(text);
+            if (friends.length) this.mergeFriendCache(friends);
+          }
+        } catch {
+          // ignore one-off parse failures from browser responses
+        }
+      })();
+      this.playwrightFeedPendingParses.add(work);
+      void work.finally(() => {
+        this.playwrightFeedPendingParses.delete(work);
+      });
+    });
+  }
+
+  private async ensurePlaywrightFeedSession(): Promise<any | null> {
+    if (!env.instantLikePlaywright || !this.qqNumber) return null;
+    if (this.playwrightFeedPage && !this.playwrightFeedPage.isClosed?.()) return this.playwrightFeedPage;
+    const headless = env.playwrightHeadless ?? true;
+    const pw = await launchPlaywright({ headless, throwOnMissing: false });
+    if (!pw) return null;
+    this.playwrightFeedBrowser = pw.browser;
+    this.playwrightFeedContext = await pw.browser.newContext({
+      userAgent: QzoneClient.UA,
+      viewport: { width: 1280, height: 800 },
+    });
+    await this.playwrightFeedContext.addCookies(this.buildPlaywrightCookies());
+    this.playwrightFeedPage = await this.playwrightFeedContext.newPage();
+    await this.attachPlaywrightFeedListeners(this.playwrightFeedPage);
+    return this.playwrightFeedPage;
+  }
+
+  async getPlaywrightFriendFeedSnapshot(limit = 20): Promise<PlaywrightFeedSnapshot> {
+    this.requireLogin();
+    const page = await this.ensurePlaywrightFeedSession();
+    if (!page || !this.qqNumber) {
+      return {
+        posts: [],
+        networkIntercepted: false,
+        domFallbackUsed: false,
+        interceptedResponseCount: 0,
+        pageUrl: '',
+      };
+    }
+    this.playwrightFeedPosts.clear();
+    this.playwrightFeedDomFallbackUsed = false;
+    this.playwrightFeedNetworkIntercepted = false;
+    this.playwrightFeedInterceptedResponseCount = 0;
+
+    await page.goto(`https://user.qzone.qq.com/${this.qqNumber}`, {
+      waitUntil: 'domcontentloaded',
+      timeout: Math.max(15_000, env.playwrightTimeoutMs),
+    });
+    await page.waitForTimeout(3500);
+    if (this.playwrightFeedPendingParses.size > 0) {
+      await Promise.allSettled([...this.playwrightFeedPendingParses]);
+    }
+
+    if (this.playwrightFeedPosts.size === 0) {
+      const domItems = await page.evaluate(() => {
+        const out: Record<string, unknown>[] = [];
+        const doc = (globalThis as { document?: any }).document;
+        const buttons = Array.from(doc?.querySelectorAll?.('[data-islike]') ?? []);
+        for (const rawButton of buttons) {
+          const element = rawButton as any;
+          let container = element;
+          while (container && !container?.hasAttribute?.('data-tid')) {
+            container = container.parentElement;
+          }
+          const likeUnikey = element.getAttribute('data-unikey') ?? '';
+          const likeCurkey = element.getAttribute('data-curkey') ?? '';
+          const detailUrl = element.getAttribute('data-detailurl') ?? '';
+          const match = (likeUnikey || detailUrl).match(/user\.qzone\.qq\.com\/(\d+)\/mood\/([^/?#]+)/i);
+          const moodUin = match?.[1] ?? '';
+          const moodTid = match?.[2] ?? '';
+          const tid = container?.getAttribute?.('data-tid') ?? moodTid;
+          const uin = container?.getAttribute?.('data-uin') ?? container?.getAttribute?.('data-opuin') ?? moodUin;
+          if (!tid || !uin) continue;
+          const appid = container?.getAttribute?.('data-appid') ?? element.getAttribute('data-appid') ?? '';
+          const typeid = container?.getAttribute?.('data-typeid') ?? element.getAttribute('data-typeid') ?? '';
+          const created = container?.getAttribute?.('data-abstime') ?? container?.getAttribute?.('data-created') ?? '';
+          const nickNode = container?.querySelector?.('.f-nick,[data-clicklog*="nick"],.ui-mr8,.f-name');
+          out.push({
+            tid,
+            uin,
+            appid,
+            typeid,
+            created_time: created ? Number(created) : 0,
+            nickname: (nickNode?.textContent ?? '').trim(),
+            isLiked: element.getAttribute('data-islike') === '1',
+            likeUnikey,
+            likeCurkey,
+            detailUrl,
+            _domSource: true,
+          });
+        }
+        return out;
+      });
+      if (domItems.length > 0) {
+        this.playwrightFeedDomFallbackUsed = true;
+        for (const item of domItems) this.mergePlaywrightFeedItem(item);
+      }
+    }
+
+    await this.syncCookiesFromPlaywrightContext();
+    const posts = [...this.playwrightFeedPosts.values()]
+      .sort((left, right) => Number(right['created_time'] ?? 0) - Number(left['created_time'] ?? 0))
+      .slice(0, Math.max(1, limit));
+    return {
+      posts,
+      networkIntercepted: this.playwrightFeedNetworkIntercepted,
+      domFallbackUsed: this.playwrightFeedDomFallbackUsed,
+      interceptedResponseCount: this.playwrightFeedInterceptedResponseCount,
+      pageUrl: String(page.url?.() ?? ''),
+    };
+  }
+
+  async likeWithPlaywrightContext(item: Record<string, unknown>): Promise<ApiResponse | null> {
+    const page = this.playwrightFeedPage;
+    if (!page || !this.qqNumber) return null;
+    const tid = String(item['tid'] ?? item['cellid'] ?? '').trim();
+    const uin = String(item['uin'] ?? item['opuin'] ?? '').trim();
+    if (!tid || !uin) return null;
+    const targetLikeUnikey = String(item['likeUnikey'] ?? '').trim();
+    const targetLikeCurkey = String(item['likeCurkey'] ?? '').trim();
+    const targetDetailUrl = String(item['detailUrl'] ?? item['detailurl'] ?? '').trim();
+
+    const clickResult = await page.evaluate(({
+      innerTid,
+      innerLikeUnikey,
+      innerLikeCurkey,
+      innerDetailUrl,
+    }: {
+      innerTid: string;
+      innerLikeUnikey: string;
+      innerLikeCurkey: string;
+      innerDetailUrl: string;
+    }) => {
+      const doc = (globalThis as { document?: any }).document;
+      const buttons = Array.from(doc?.querySelectorAll?.('[data-islike]') ?? []);
+      for (const rawButton of buttons) {
+        const button = rawButton as any;
+        const unikey = button.getAttribute('data-unikey') ?? '';
+        const curkey = button.getAttribute('data-curkey') ?? '';
+        const detailUrl = button.getAttribute('data-detailurl') ?? '';
+        const containerTid = button.closest('[data-tid]')?.getAttribute('data-tid') ?? '';
+        const matched = (
+          (innerLikeUnikey && unikey === innerLikeUnikey)
+          || (innerLikeCurkey && curkey === innerLikeCurkey)
+          || (innerDetailUrl && detailUrl === innerDetailUrl)
+          || (
+          unikey.includes(`mood/${innerTid}`)
+          || curkey.includes(innerTid)
+          || detailUrl.includes(innerTid)
+          || containerTid === innerTid
+          )
+        );
+        if (!matched) continue;
+        const before = button.getAttribute('data-islike') ?? '';
+        if (before !== '0') {
+          return { clicked: false, alreadyLiked: before === '1' };
+        }
+        button.click();
+        return { clicked: true, alreadyLiked: false };
+      }
+
+      return { clicked: false, alreadyLiked: false };
+    }, {
+      innerTid: tid,
+      innerLikeUnikey: targetLikeUnikey,
+      innerLikeCurkey: targetLikeCurkey,
+      innerDetailUrl: targetDetailUrl,
+    }) as { clicked?: boolean; alreadyLiked?: boolean };
+    if (clickResult.alreadyLiked) return { code: 0, message: 'playwright already liked', _playwrightClick: true };
+    if (clickResult.clicked) {
+      try {
+        await page.waitForFunction(({
+          innerTid,
+          innerLikeUnikey,
+          innerLikeCurkey,
+          innerDetailUrl,
+        }: {
+          innerTid: string;
+          innerLikeUnikey: string;
+          innerLikeCurkey: string;
+          innerDetailUrl: string;
+        }) => {
+          const doc = (globalThis as { document?: any }).document;
+          const buttons = Array.from(doc?.querySelectorAll?.('[data-islike]') ?? []);
+          for (const rawButton of buttons) {
+            const button = rawButton as any;
+            const unikey = button.getAttribute('data-unikey') ?? '';
+            const curkey = button.getAttribute('data-curkey') ?? '';
+            const detailUrl = button.getAttribute('data-detailurl') ?? '';
+            const containerTid = button.closest('[data-tid]')?.getAttribute('data-tid') ?? '';
+            const matched = (
+              (innerLikeUnikey && unikey === innerLikeUnikey)
+              || (innerLikeCurkey && curkey === innerLikeCurkey)
+              || (innerDetailUrl && detailUrl === innerDetailUrl)
+              || (
+              unikey.includes(`mood/${innerTid}`)
+              || curkey.includes(innerTid)
+              || detailUrl.includes(innerTid)
+              || containerTid === innerTid
+              )
+            );
+            if (matched) return button.getAttribute('data-islike') === '1';
+          }
+          return false;
+        }, {
+          innerTid: tid,
+          innerLikeUnikey: targetLikeUnikey,
+          innerLikeCurkey: targetLikeCurkey,
+          innerDetailUrl: targetDetailUrl,
+        }, { timeout: 2500 });
+        await this.syncCookiesFromPlaywrightContext();
+        return { code: 0, message: 'playwright click ok', _playwrightClick: true };
+      } catch {
+        // Fall through to browser fetch when the click did not visibly change page state.
+      }
+    }
+
+    const appid = Number(item['appid'] ?? 311);
+    const typeid = Number(item['typeid'] ?? 0);
+    const abstime = Number(item['created_time'] ?? item['createTime'] ?? Math.floor(Date.now() / 1000));
+    const unikey = String(item['likeUnikey'] ?? `http://user.qzone.qq.com/${uin}/mood/${tid}`);
+    const curkey = String(item['likeCurkey'] ?? unikey);
+    const gtk = this.getGtk();
+    const payload = await page.evaluate(async (
+      {
+        selfUin,
+        innerUin,
+        innerTid,
+        appid: innerAppid,
+        typeid: innerTypeid,
+        abstime: innerAbstime,
+        unikey: innerUnikey,
+        curkey: innerCurkey,
+        gtk: innerGtk,
+      }: {
+        selfUin: string;
+        innerUin: string;
+        innerTid: string;
+        appid: number;
+        typeid: number;
+        abstime: number;
+        unikey: string;
+        curkey: string;
+        gtk: number;
+      },
+    ) => {
+      const qzreferrer = `https://user.qzone.qq.com/${selfUin}/main`;
+      try {
+        const firstResponse = await fetch(
+          `https://user.qzone.qq.com/proxy/domain/w.qzone.qq.com/cgi-bin/likes/internal_dolike_app?g_tk=${innerGtk}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-Requested-With': 'XMLHttpRequest' },
+            body: new URLSearchParams({
+              qzreferrer,
+              opuin: selfUin,
+              unikey: innerUnikey,
+              curkey: innerCurkey,
+              appid: String(innerAppid),
+              typeid: String(innerTypeid),
+              fid: innerTid,
+              from: '1',
+              active: '0',
+              fupdate: '1',
+              abstime: String(innerAbstime),
+              format: 'json',
+            }).toString(),
+            credentials: 'include',
+          },
+        );
+        const first = await firstResponse.json() as Record<string, unknown>;
+        if (Number(first['code'] ?? first['ret'] ?? -1) === 0) return first;
+        const secondResponse = await fetch(
+          `https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/like_cgi_likev6?g_tk=${innerGtk}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-Requested-With': 'XMLHttpRequest' },
+            body: new URLSearchParams({
+              opuin: selfUin,
+              ouin: innerUin,
+              fid: innerTid,
+              abstime: String(innerAbstime),
+              appid: String(innerAppid),
+              typeid: String(innerTypeid),
+              key: '',
+              format: 'json',
+              qzreferrer,
+            }).toString(),
+            credentials: 'include',
+          },
+        );
+        const second = await secondResponse.json() as Record<string, unknown>;
+        if (Number(second['code'] ?? second['ret'] ?? -1) === 0) return second;
+        const thirdResponse = await fetch(
+          `https://mobile.qzone.qq.com/like?g_tk=${innerGtk}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-Requested-With': 'XMLHttpRequest' },
+            body: new URLSearchParams({
+              unikey: innerUnikey,
+              curkey: innerUnikey,
+              appid: String(innerAppid),
+              typeid: String(innerTypeid),
+              active: '0',
+              fupdate: '1',
+            }).toString(),
+            credentials: 'include',
+          },
+        );
+        const third = await thirdResponse.json() as Record<string, unknown>;
+        return third;
+      } catch (error) {
+        return {
+          code: -1,
+          message: error instanceof Error ? error.message : String(error),
+        } as Record<string, unknown>;
+      }
+    }, { selfUin: this.qqNumber, innerUin: uin, innerTid: tid, appid, typeid, abstime, unikey, curkey, gtk });
+    if (Number((payload as Record<string, unknown>)['code'] ?? (payload as Record<string, unknown>)['ret'] ?? -1) === 0) {
+      await page.waitForTimeout(700).catch(() => {});
+      await this.syncCookiesFromPlaywrightContext();
+    }
+    return payload as ApiResponse;
+  }
+
+  async verifyLikeInPlaywrightContext(item: Record<string, unknown>): Promise<boolean> {
+    const page = this.playwrightFeedPage;
+    if (!page) return false;
+    const tid = String(item['tid'] ?? item['cellid'] ?? '').trim();
+    if (!tid) return false;
+    const targetLikeUnikey = String(item['likeUnikey'] ?? '').trim();
+    const targetLikeCurkey = String(item['likeCurkey'] ?? '').trim();
+    const targetDetailUrl = String(item['detailUrl'] ?? item['detailurl'] ?? '').trim();
+    try {
+      return await page.evaluate(({
+        innerTid,
+        innerLikeUnikey,
+        innerLikeCurkey,
+        innerDetailUrl,
+      }: {
+        innerTid: string;
+        innerLikeUnikey: string;
+        innerLikeCurkey: string;
+        innerDetailUrl: string;
+      }) => {
+        const doc = (globalThis as { document?: any }).document;
+        const buttons = Array.from(doc?.querySelectorAll?.('[data-islike]') ?? []);
+        for (const rawButton of buttons) {
+          const button = rawButton as any;
+          const unikey = button.getAttribute('data-unikey') ?? '';
+          const curkey = button.getAttribute('data-curkey') ?? '';
+          const detailUrl = button.getAttribute('data-detailurl') ?? '';
+          const containerTid = button.closest('[data-tid]')?.getAttribute('data-tid') ?? '';
+          const matched = (
+            (innerLikeUnikey && unikey === innerLikeUnikey)
+            || (innerLikeCurkey && curkey === innerLikeCurkey)
+            || (innerDetailUrl && detailUrl === innerDetailUrl)
+            || (
+              unikey.includes(`mood/${innerTid}`)
+              || curkey.includes(innerTid)
+              || detailUrl.includes(innerTid)
+              || containerTid === innerTid
+            )
+          );
+          if (matched) {
+            return button.getAttribute('data-islike') === '1';
+          }
+        }
+        return false;
+      }, {
+        innerTid: tid,
+        innerLikeUnikey: targetLikeUnikey,
+        innerLikeCurkey: targetLikeCurkey,
+        innerDetailUrl: targetDetailUrl,
+      });
+    } catch {
+      return false;
+    }
   }
 
   // ──────────────────────────────────────────────
@@ -1457,6 +2341,20 @@ export class QzoneClient {
     return respText.replace(/\\x22/g, '"').replace(/\\x3C/g, '<').replace(/\\\//g, '/');
   }
 
+  private buildFeeds3FailureResponse(
+    payload: ApiResponse,
+    extras: Record<string, unknown>,
+  ): ApiResponse {
+    return {
+      ...payload,
+      code: Number(payload.code ?? -1),
+      message: this.describeApiFailure(payload) || String(payload.message ?? payload.msg ?? 'feeds3 request failed'),
+      _source: 'feeds3',
+      _failure_kind: this.getApiFailureKind(payload),
+      ...extras,
+    };
+  }
+
   // ──────────────────────────────────────────────
   // feeds3 缓存
   // ──────────────────────────────────────────────
@@ -1526,6 +2424,12 @@ export class QzoneClient {
       `https://user.qzone.qq.com/proxy/domain/ic2.qzone.qq.com/cgi-bin/feeds/feeds3_html_more?${params.toString()}`;
     const resp = await this.get(url, { headers: this.pcHeaders(this.getQzreferrer()) });
     log('DEBUG', `feeds3 raw response length=${resp.text.length}, status=${resp.status}`);
+    const businessFailure = this.extractFeeds3BusinessFailure(resp.text);
+    if (businessFailure) {
+      this.lastFeeds3BusinessFailure = businessFailure;
+      throw new Feeds3BusinessError(businessFailure);
+    }
+    this.lastFeeds3BusinessFailure = null;
     const text = this.decodeJsonpFeedsHtmlPayload(resp.text);
     log('DEBUG', `feeds3 decoded text length=${text.length}`);
     // Dump to file for debug (与 dumpDebugPayload 一致：cachePath/debug)
@@ -1533,9 +2437,11 @@ export class QzoneClient {
       try {
         const debugDir = path.join(this.config.cachePath, 'debug');
         fs.mkdirSync(debugDir, { recursive: true });
-        const filepath = path.join(debugDir, `feeds3_${uin}_${scope}.html`);
-        fs.writeFileSync(filepath, text, 'utf8');
-        log('DEBUG', `feeds3 dumped to ${filepath}`);
+        const stablePath = path.join(debugDir, `feeds3_${uin}_${scope}.html`);
+        const snapshotPath = path.join(debugDir, `feeds3_${uin}_${scope}_${Date.now()}.html`);
+        fs.writeFileSync(stablePath, text, 'utf8');
+        fs.writeFileSync(snapshotPath, text, 'utf8');
+        log('DEBUG', `feeds3 dumped to ${stablePath} and ${snapshotPath}`);
       } catch {}
     }
     // LRU: delete-then-set 使 Map 保持按最近访问排序（最旧在前）
@@ -1659,8 +2565,7 @@ export class QzoneClient {
       // 与 feeds3_html_more 一致：把本页 HTML 内嵌评论区并入全局桶，供 getCommentsBestEffort 命中
       // （否则仅通过 act_feed 看到的帖，get_comments 永远走 feeds3_more 首屏，会漏评）
       try {
-        const cm = _parseFeeds3Comments(text);
-        this.mergeFeeds3Comments(cm);
+        this.mergeFeeds3AncillaryFromHtml(text, Math.floor(Date.now() / 1000), 'feeds_html_act_all');
       } catch (e) {
         log('WARN', `feeds_html_act_all: parseFeeds3Comments failed: ${e}`);
       }
@@ -1906,33 +2811,8 @@ export class QzoneClient {
       }
 
       // ── 解析并缓存 feeds3 内嵌评论 ──
-      this.feeds3Comments.clear();
-      this.feeds3CommentsFetchedAt.clear();
       for (const htmlText of allHtmlTexts) {
-        try {
-          const comments = _parseFeeds3Comments(htmlText);
-          this.mergeFeeds3Comments(comments);
-        } catch (e) {
-          log('WARN', `parseFeeds3Comments failed: ${e}`);
-        }
-      }
-
-      // ── 解析并缓存 feeds3 内嵌点赞 ──
-      this.feeds3Likes.clear();
-      for (const htmlText of allHtmlTexts) {
-        const likes = _parseFeeds3Likes(htmlText);
-        for (const [tid, likeArr] of likes) {
-          const existing = this.feeds3Likes.get(tid);
-          if (existing) {
-            // 去重合并（同 tid 下同 uin 只保留最新）
-            const seenUins = new Set(existing.map(l => l.uin));
-            for (const l of likeArr) {
-              if (!seenUins.has(l.uin)) { seenUins.add(l.uin); existing.push(l); }
-            }
-          } else {
-            this.feeds3Likes.set(tid, [...likeArr]);
-          }
-        }
+        this.mergeFeeds3AncillaryFromHtml(htmlText, Math.floor(Date.now() / 1000), 'getEmotionListViaFeeds3');
       }
 
       // 合并翻页后重新排序（最新在前）
@@ -1994,28 +2874,50 @@ export class QzoneClient {
       };
     } catch (exc) {
       log('ERROR', `feeds3 fallback 失败: ${exc}`);
-      return {
-        code: -10000,
-        message: String(exc),
-        msglist: [],
-        has_more: false,
-        next_pos: pos,
-        next_cursor: '',
-        _page_info: {
-          count: 0,
-          source: 'feeds3',
-          strategy: '',
-          host_uin: uin,
-          pos,
-          num,
-          max_pages: maxPages,
-          pages_fetched: 0,
-          full_fetched_len: 0,
-          truncated_by_max_pages: false,
-          pagination: 'offset' as const,
-          error: true,
-        },
-      };
+      const feeds3Failure = this.extractFeeds3BusinessError(exc);
+      return feeds3Failure
+        ? this.buildFeeds3FailureResponse(feeds3Failure, {
+          msglist: [],
+          has_more: false,
+          next_pos: pos,
+          next_cursor: '',
+          _page_info: {
+            count: 0,
+            source: 'feeds3',
+            strategy: '',
+            host_uin: uin,
+            pos,
+            num,
+            max_pages: maxPages,
+            pages_fetched: 0,
+            full_fetched_len: 0,
+            truncated_by_max_pages: false,
+            pagination: 'offset' as const,
+            error: true,
+          },
+        })
+        : {
+          code: -10000,
+          message: String(exc),
+          msglist: [],
+          has_more: false,
+          next_pos: pos,
+          next_cursor: '',
+          _page_info: {
+            count: 0,
+            source: 'feeds3',
+            strategy: '',
+            host_uin: uin,
+            pos,
+            num,
+            max_pages: maxPages,
+            pages_fetched: 0,
+            full_fetched_len: 0,
+            truncated_by_max_pages: false,
+            pagination: 'offset' as const,
+            error: true,
+          },
+        };
     }
   }
 
@@ -2063,6 +2965,7 @@ export class QzoneClient {
         );
         const friends = this.extractFriendsFromFeeds3FromText(text);
         if (friends.length) this.mergeFriendCache(friends);
+        this.mergeFeeds3AncillaryFromHtml(text, Math.floor(Date.now() / 1000), 'getFriendFeeds.fast');
         const hasMoreFeeds = !/hasMoreFeeds\s*:\s*false/.test(text);
         const pageCursor = hasMoreFeeds ? _extractExternparam(text) : '';
         const parseCap = Math.min(200, Math.max(80, want * 4));
@@ -2093,6 +2996,7 @@ export class QzoneClient {
         );
         const friends = this.extractFriendsFromFeeds3FromText(text);
         if (friends.length) this.mergeFriendCache(friends);
+        this.mergeFeeds3AncillaryFromHtml(text, Math.floor(Date.now() / 1000), `getFriendFeeds.page${round + 1}`);
 
         const hasMore = !/hasMoreFeeds\s*:\s*false/.test(text);
         const pageCursor = hasMore ? _extractExternparam(text) : '';
@@ -2130,14 +3034,22 @@ export class QzoneClient {
       };
     } catch (exc) {
       log('ERROR', `friend feeds 获取失败: ${exc}`);
-      return {
-        code: -1,
-        message: String(exc),
-        msglist: [],
-        next_cursor: '',
-        has_more: false,
-        _page_info: { count: 0, source: 'feeds3', fast_mode: fastMode },
-      };
+      const feeds3Failure = this.extractFeeds3BusinessError(exc);
+      return feeds3Failure
+        ? this.buildFeeds3FailureResponse(feeds3Failure, {
+          msglist: [],
+          next_cursor: '',
+          has_more: false,
+          _page_info: { count: 0, source: 'feeds3', fast_mode: fastMode, error: true },
+        })
+        : {
+          code: -1,
+          message: String(exc),
+          msglist: [],
+          next_cursor: '',
+          has_more: false,
+          _page_info: { count: 0, source: 'feeds3', fast_mode: fastMode },
+        };
     }
   }
 
@@ -2302,7 +3214,362 @@ export class QzoneClient {
     return -1;
   }
 
+  private collectCommentListFromResult(res: ApiResponse): Record<string, unknown>[] {
+    for (const key of ['commentlist', 'comment_list', 'comments', 'data']) {
+      const value = res[key];
+      if (Array.isArray(value)) return value as Record<string, unknown>[];
+    }
+    return [];
+  }
+
+  async probeCapabilities(): Promise<CapabilityReport> {
+    const checkedAt = new Date().toISOString();
+    const capabilities: CapabilityStatus[] = [];
+
+    try {
+      const sessionOk = await this.validateSession(true);
+      capabilities.push({
+        name: 'session',
+        available: sessionOk,
+        reliability: 'strict',
+        source: 'official_api',
+        warnings: sessionOk ? [] : ['session validation failed'],
+        reason: sessionOk ? undefined : 'cookie invalid or expired',
+      });
+    } catch (error) {
+      capabilities.push({
+        name: 'session',
+        available: false,
+        reliability: 'strict',
+        source: 'official_api',
+        warnings: [String(error)],
+        reason: 'session validation threw',
+      });
+    }
+
+    const strictPosts = await this.getPostsStrict(this.qqNumber ?? undefined, { maxPages: 1 });
+    capabilities.push({
+      name: 'posts.read',
+      available: strictPosts.ok,
+      reliability: 'strict',
+      source: strictPosts.ok ? strictPosts.source : strictPosts.source,
+      warnings: strictPosts.warnings,
+      reason: strictPosts.ok ? undefined : strictPosts.kind,
+    });
+
+    try {
+      const friendFeeds = await this.getFriendFeeds('', 10, { fastMode: true });
+      capabilities.push({
+        name: 'friend_feeds.read',
+        available: Number(friendFeeds.code ?? -1) === 0,
+        reliability: 'best_effort',
+        source: this.inferSdkSource(friendFeeds._source ?? (friendFeeds._page_info as Record<string, unknown> | undefined)?.source, 'feeds3_html'),
+        warnings: Number(friendFeeds.code ?? -1) === 0 ? [] : [String(friendFeeds.message ?? 'friend feeds unavailable')],
+        reason: Number(friendFeeds.code ?? -1) === 0 ? undefined : String(friendFeeds.message ?? 'unavailable'),
+      });
+    } catch (error) {
+      capabilities.push({
+        name: 'friend_feeds.read',
+        available: false,
+        reliability: 'best_effort',
+        source: 'feeds3_html',
+        warnings: [String(error)],
+        reason: 'friend feeds threw',
+      });
+    }
+
+    try {
+      const playwrightFeed = await this.getPlaywrightFriendFeedSnapshot(10);
+      capabilities.push({
+        name: 'playwright_feed.read',
+        available: playwrightFeed.posts.length > 0,
+        reliability: 'best_effort',
+        source: 'playwright_feed',
+        warnings: playwrightFeed.posts.length > 0
+          ? []
+          : ['playwright feed returned no posts'],
+        reason: playwrightFeed.posts.length > 0
+          ? undefined
+          : `network=${playwrightFeed.networkIntercepted ? '1' : '0'} dom=${playwrightFeed.domFallbackUsed ? '1' : '0'}`,
+      });
+    } catch (error) {
+      capabilities.push({
+        name: 'playwright_feed.read',
+        available: false,
+        reliability: 'best_effort',
+        source: 'playwright_feed',
+        warnings: [String(error)],
+        reason: 'playwright feed threw',
+      });
+    }
+
+    const diagnostic = this.createDiagnosticRef('capability_trace', { checked_at: checkedAt, capabilities });
+    return {
+      ok: capabilities.every((item) => item.available || item.reliability === 'best_effort'),
+      checkedAt,
+      capabilities,
+      diagnostic,
+    };
+  }
+
+  async getPostsStrict(
+    uin?: string,
+    options?: StrictOptions,
+  ): Promise<SdkResult<{ posts: Record<string, unknown>[]; nextCursor?: string; hasMore: boolean }>> {
+    const targetUin = uin ?? this.qqNumber ?? '';
+    try {
+      const res = await this.getEmotionList(
+        targetUin,
+        options?.pos ?? 0,
+        options?.num ?? 50,
+        undefined,
+        undefined,
+        undefined,
+        options?.maxPages ?? 15,
+        options?.cursor,
+      );
+      if (Number(res.code ?? -1) !== 0) {
+        const kind = this.getApiFailureKind(res);
+        return this.sdkFailure(
+          kind,
+          kind === 'rate_limit',
+          'strict',
+          { endpoint: 'getPostsStrict', uin: targetUin, message: String(res.message ?? 'read failed') },
+          this.inferSdkSource(res._source, 'official_api'),
+        );
+      }
+      const posts = Array.isArray(res.msglist) ? res.msglist as Record<string, unknown>[] : [];
+      return this.sdkSuccess(
+        {
+          posts,
+          nextCursor: typeof res.next_cursor === 'string' ? res.next_cursor : undefined,
+          hasMore: Boolean(res.hasMoreFeeds ?? res.has_more ?? res.next_cursor),
+        },
+        this.inferSdkSource(res._source ?? (res._page_info as Record<string, unknown> | undefined)?.source, 'official_api'),
+        'strict',
+      );
+    } catch (error) {
+      return this.classifySdkFailure(error, 'getPostsStrict', targetUin);
+    }
+  }
+
+  async getProfileStrict(uin: string): Promise<SdkResult<Record<string, unknown>>> {
+    try {
+      const res = await this.getUserInfo(uin);
+      if (Number(res.code ?? 0) !== 0) {
+        return this.sdkFailure(
+          this.isAuthFailure(res) ? 'auth' : 'upstream_changed',
+          false,
+          'strict',
+          { endpoint: 'getProfileStrict', uin, message: String(res.message ?? 'profile read failed') },
+          'official_api',
+        );
+      }
+      return this.sdkSuccess(res as Record<string, unknown>, 'official_api', 'strict');
+    } catch (error) {
+      return this.classifySdkFailure(error, 'getProfileStrict', uin);
+    }
+  }
+
+  async publishPostStrict(content: string, images?: string[], whoCanSee?: number): Promise<SdkResult<{ tid: string; picIds: string[] }>> {
+    try {
+      const [tid, picIds] = await this.publish(content, images, whoCanSee);
+      return this.sdkSuccess({ tid, picIds }, 'official_api', 'strict');
+    } catch (error) {
+      return this.classifySdkFailure(error, 'publishPostStrict', this.qqNumber ?? undefined);
+    }
+  }
+
+  async deletePostStrict(tid: string, topicId = ''): Promise<SdkResult<{ tid: string }>> {
+    try {
+      const res = await this.deleteEmotion(tid, topicId);
+      if (Number(res.code ?? -1) !== 0) {
+        return this.sdkFailure(
+          this.isAuthFailure(res) ? 'auth' : 'upstream_changed',
+          false,
+          'strict',
+          { endpoint: 'deletePostStrict', tid, message: String(res.message ?? 'delete failed') },
+          'official_api',
+        );
+      }
+      return this.sdkSuccess({ tid }, 'official_api', 'strict');
+    } catch (error) {
+      return this.classifySdkFailure(error, 'deletePostStrict', undefined, tid);
+    }
+  }
+
+  async getPostDetailBestEffort(uin: string, tid: string): Promise<SdkResult<{
+    post: Record<string, unknown>;
+    identity: PostIdentity;
+  }>> {
+    const diagnostic = this.createDiagnosticRef('parse_trace', {
+      endpoint: 'getPostDetailBestEffort',
+      tid,
+      uin,
+      candidate_keys: this.collectPostEntityKeys(tid),
+    });
+    try {
+      const res = await this.getShuoshuoDetail(uin, tid);
+      if (Number(res.code ?? -1) !== 0) {
+        return this.sdkFailure(
+          'parse_miss',
+          false,
+          'best_effort',
+          { endpoint: 'getPostDetailBestEffort', tid, uin, message: String(res.message ?? 'detail unavailable') },
+          this.inferSdkSource(res._source, 'feeds3_html'),
+          [],
+          diagnostic,
+        );
+      }
+      const warnings: string[] = [];
+      if (String((res as Record<string, unknown>)['_message'] ?? '').trim()) warnings.push(String((res as Record<string, unknown>)['_message']));
+      return this.sdkSuccess(
+        { post: res as Record<string, unknown>, identity: this.buildPostIdentity(tid, uin) },
+        this.inferSdkSource(res._source, 'feeds3_html'),
+        'best_effort',
+        warnings,
+        diagnostic,
+      );
+    } catch (error) {
+      const failure = this.classifySdkFailure(error, 'getPostDetailBestEffort', uin, tid);
+      failure.diagnostic = diagnostic;
+      return failure;
+    }
+  }
+
+  async getCommentsBestEffort(input: {
+    uin: string;
+    tid: string;
+    num?: number;
+    pos?: number;
+    options?: BestEffortOptions;
+  }): Promise<SdkResult<{
+    comments: Record<string, unknown>[];
+    identity: PostIdentity;
+    availability: BestEffortAvailability;
+  }>>;
+
   async getCommentsBestEffort(
+    uin: string,
+    tid: string,
+    num?: number,
+    pos?: number,
+    options?: { forceRefresh?: boolean; maxCacheAgeSec?: number; fastMode?: boolean },
+  ): Promise<ApiResponse>;
+
+  async getCommentsBestEffort(
+    uin: string | {
+      uin: string;
+      tid: string;
+      num?: number;
+      pos?: number;
+      options?: BestEffortOptions;
+    },
+    tid?: string,
+    num = 20,
+    pos = 0,
+    options?: { forceRefresh?: boolean; maxCacheAgeSec?: number; fastMode?: boolean },
+  ): Promise<ApiResponse | SdkResult<{
+    comments: Record<string, unknown>[];
+    identity: PostIdentity;
+    availability: BestEffortAvailability;
+  }>> {
+    if (typeof uin === 'object' && uin !== null) {
+      return this.getCommentsBestEffortSdk(uin as {
+        uin: string;
+        tid: string;
+        num?: number;
+        pos?: number;
+        options?: BestEffortOptions;
+      });
+    }
+    return this.getCommentsBestEffortLegacy(uin, tid ?? '', num, pos, options);
+  }
+
+  private async getCommentsBestEffortSdk(input: {
+    uin: string;
+    tid: string;
+    num?: number;
+    pos?: number;
+    options?: BestEffortOptions;
+  }): Promise<SdkResult<{
+    comments: Record<string, unknown>[];
+    identity: PostIdentity;
+    availability: BestEffortAvailability;
+  }>> {
+    const diagnostic = this.createDiagnosticRef('parse_trace', {
+      endpoint: 'getCommentsBestEffort',
+      tid: input.tid,
+      uin: input.uin,
+      candidate_keys: this.collectPostEntityKeys(input.tid),
+    });
+    try {
+      const res = await this.getCommentsBestEffortLegacy(input.uin, input.tid, input.num ?? 20, input.pos ?? 0, input.options);
+      const comments = this.collectCommentListFromResult(res);
+      const meta = this.getPostMeta(input.tid);
+      const embeddedTotal = Number(res._feeds3_total ?? comments.length);
+      const expected = Number(meta?.cmtnum ?? embeddedTotal ?? 0);
+      const warnings: string[] = [];
+      let availability: BestEffortAvailability = 'available_full';
+      if (Number(res.code ?? -1) !== 0) {
+        const kind = this.getApiFailureKind(res);
+        if (kind === 'auth' || kind === 'rate_limit') {
+          return this.sdkFailure(
+            kind,
+            kind === 'rate_limit',
+            'best_effort',
+            {
+              endpoint: 'getCommentsBestEffort',
+              tid: input.tid,
+              uin: input.uin,
+              candidateKeys: this.collectPostEntityKeys(input.tid),
+              message: String(res.message ?? 'comment read failed'),
+            },
+            this.inferSdkSource(res._source, 'feeds3_html'),
+            warnings,
+            diagnostic,
+          );
+        }
+      }
+      if (comments.length === 0 && expected > 0) {
+        availability = 'not_embedded';
+        warnings.push('post counts indicate comments exist but html did not embed comment detail');
+      } else if (expected > comments.length) {
+        availability = 'available_partial';
+        warnings.push('embedded comments are partial relative to counted comments');
+      }
+      if (Number(res.code ?? -1) !== 0 && comments.length === 0 && availability !== 'not_embedded') {
+        return this.sdkFailure(
+          'parse_miss',
+          false,
+          'best_effort',
+          {
+            endpoint: 'getCommentsBestEffort',
+            tid: input.tid,
+            uin: input.uin,
+            candidateKeys: this.collectPostEntityKeys(input.tid),
+            message: String(res.message ?? 'comment parse miss'),
+          },
+          this.inferSdkSource(res._source, 'feeds3_html'),
+          warnings,
+          diagnostic,
+        );
+      }
+      return this.sdkSuccess(
+        { comments, identity: this.buildPostIdentity(input.tid, input.uin), availability },
+        this.inferSdkSource(res._source, comments.length > 0 ? 'feeds3_html' : 'derived'),
+        'best_effort',
+        warnings,
+        diagnostic,
+      );
+    } catch (error) {
+      const failure = this.classifySdkFailure(error, 'getCommentsBestEffort', input.uin, input.tid);
+      failure.diagnostic = diagnostic;
+      return failure;
+    }
+  }
+
+  private async getCommentsBestEffortLegacy(
     uin: string,
     tid: string,
     num = 20,
@@ -2311,6 +3578,7 @@ export class QzoneClient {
   ): Promise<ApiResponse> {
     const fastMode = options?.fastMode === true;
     log('DEBUG', `getCommentsBestEffort: uin=${uin} tid=${tid} num=${num} pos=${pos} fastMode=${fastMode}`);
+    this.lastFeeds3BusinessFailure = null;
 
     const forceRefresh = options?.forceRefresh ?? false;
     const maxCacheAgeSec = options?.maxCacheAgeSec ?? 90;
@@ -2318,6 +3586,7 @@ export class QzoneClient {
     this.aliasFeeds3CommentsToCanonicalTid(tid);
     feeds3List = this.feeds3Comments.get(tid);
     const cacheAgeSec = this.commentCacheAgeSeconds(tid);
+    const candidateKeys = this.collectPostEntityKeys(tid);
 
     const wrapCommentPage = (
       base: ApiResponse,
@@ -2374,7 +3643,7 @@ export class QzoneClient {
         if (this.qqNumber) {
           const htmlFriend = await this.fetchFeeds3Html(this.qqNumber!, false, 0, 50, '', undefined, 'all', 'all');
           commentHttpFetches += 1;
-          this.mergeFeeds3Comments(_parseFeeds3Comments(htmlFriend));
+          this.mergeFeeds3AncillaryFromHtml(htmlFriend, Math.floor(Date.now() / 1000), 'getCommentsBestEffort.friend');
           this.aliasFeeds3CommentsToCanonicalTid(tid);
           feeds3List = this.feeds3Comments.get(tid);
           log(
@@ -2387,7 +3656,7 @@ export class QzoneClient {
         if (!feeds3List || feeds3List.length === 0) {
           const htmlAuthor = await this.fetchFeeds3Html(uin, true, 1, 50);
           commentHttpFetches += 1;
-          this.mergeFeeds3Comments(_parseFeeds3Comments(htmlAuthor));
+          this.mergeFeeds3AncillaryFromHtml(htmlAuthor, Math.floor(Date.now() / 1000), 'getCommentsBestEffort.author');
           this.aliasFeeds3CommentsToCanonicalTid(tid);
           feeds3List = this.feeds3Comments.get(tid);
           log(
@@ -2439,6 +3708,25 @@ export class QzoneClient {
     }
 
     log('WARNING', `getCommentsBestEffort: 未在 feeds3 好友流+作者空间首页解析到该 tid 的评论`);
+    if (this.lastFeeds3BusinessFailure) {
+      return wrapCommentPage(
+        this.buildFeeds3FailureResponse(this.lastFeeds3BusinessFailure, {
+          commentlist: [],
+          _feeds3_total: 0,
+        }),
+        0,
+        0,
+        'feeds3',
+        fastMode ? commentHttpFetches : undefined,
+      );
+    }
+    if (candidateKeys.length > 0) {
+      const meta = this.postMetaCache.get(tid);
+      const commentHint = meta?.cmtnum != null && meta.cmtnum > 0
+        ? 'post_counts_present_but_not_embedded'
+        : 'html_no_matching_comment_bucket';
+      log('WARNING', `getCommentsBestEffort: ${commentHint} tid=${tid} candidate_keys=${candidateKeys.join('|')}`);
+    }
     const empty = {
       code: -1,
       message:
@@ -2460,6 +3748,7 @@ export class QzoneClient {
   // ──────────────────────────────────────────────
 
   private feeds3LikesCache = new Map<string, Array<Record<string, unknown>>>();
+  private lastFeeds3FailureByTid = new Map<string, ApiResponse>();
 
   /**
    * 获取点赞列表（仅 feeds3）。
@@ -2467,6 +3756,9 @@ export class QzoneClient {
   async getLikeListBestEffort(uin: string, tid: string): Promise<Array<Record<string, unknown>>> {
     log('DEBUG', `getLikeListBestEffort: uin=${uin} tid=${tid}`);
 
+    this.lastFeeds3BusinessFailure = null;
+    this.lastFeeds3FailureByTid.delete(tid);
+    this.aliasFeeds3LikesToCanonicalTid(tid);
     const cached = this.feeds3LikesCache.get(tid);
     if (cached) {
       log('INFO', `getLikeListBestEffort: 使用 feeds3 缓存 ${cached.length} 个点赞`);
@@ -2476,30 +3768,20 @@ export class QzoneClient {
     // 主动拉取 feeds3 解析点赞
     try {
       log('INFO', `getLikeListBestEffort: feeds3 缓存未命中，主动拉取 uin=${uin} tid=${tid}`);
-      let htmlText = await this.fetchFeeds3Html(uin, true, 1, 50);
-      let likesMap = _parseFeeds3Likes(htmlText);
-      let likes = likesMap.get(tid) ?? [];
+      const htmlText = await this.fetchFeeds3Html(uin, true, 1, 50);
+      this.mergeFeeds3AncillaryFromHtml(htmlText, Math.floor(Date.now() / 1000), 'getLikeListBestEffort.author');
+      this.aliasFeeds3LikesToCanonicalTid(tid);
+      let likes = this.feeds3Likes.get(tid) ?? [];
 
       if (likes.length === 0 && uin !== this.qqNumber) {
         log('DEBUG', `getLikeListBestEffort: scope=1 未找到，尝试 scope=0`);
         const htmlText2 = await this.fetchFeeds3Html(this.qqNumber!, false, 0, 50, '', undefined, 'all', 'all');
-        const likesMap2 = _parseFeeds3Likes(htmlText2);
-        const likes2 = likesMap2.get(tid) ?? [];
+        this.mergeFeeds3AncillaryFromHtml(htmlText2, Math.floor(Date.now() / 1000), 'getLikeListBestEffort.friend');
+        this.aliasFeeds3LikesToCanonicalTid(tid);
+        const likes2 = this.feeds3Likes.get(tid) ?? [];
         if (likes2.length > 0) {
           likes = likes2;
-          likesMap = likesMap2;
         }
-      }
-
-      // 缓存所有解析到的点赞数据
-      for (const [postTid, postLikes] of likesMap) {
-        this.feeds3LikesCache.set(postTid, postLikes.map(l => ({
-          uin: l.uin,
-          name: l.nickname,
-          time: l.abstime,
-          customItemId: l.customItemId,
-          _source: 'feeds3_html',
-        })));
       }
 
       if (likes.length > 0) {
@@ -2511,6 +3793,18 @@ export class QzoneClient {
       log('WARNING', `getLikeListBestEffort: feeds3 解析失败: ${e}`);
     }
 
+    const candidateKeys = this.collectPostEntityKeys(tid);
+    if (this.lastFeeds3BusinessFailure) {
+      this.lastFeeds3FailureByTid.set(tid, this.lastFeeds3BusinessFailure);
+      return [];
+    }
+    if (candidateKeys.length > 0) {
+      const meta = this.postMetaCache.get(tid);
+      const likeHint = meta?.likenum != null && meta.likenum > 0
+        ? 'post_counts_present_but_not_embedded'
+        : 'html_no_matching_like_bucket';
+      log('WARNING', `getLikeListBestEffort: ${likeHint} tid=${tid} candidate_keys=${candidateKeys.join('|')}`);
+    }
     log('WARNING', `getLikeListBestEffort: 全部失败，返回空数组`);
     return [];
   }
@@ -2518,6 +3812,109 @@ export class QzoneClient {
   // ──────────────────────────────────────────────
   // Image upload
   // ──────────────────────────────────────────────
+  async getLikesBestEffort(uin: string, tid: string): Promise<SdkResult<{
+    likes: Array<Record<string, unknown>>;
+    identity: PostIdentity;
+    availability: BestEffortAvailability;
+  }>> {
+    const diagnostic = this.createDiagnosticRef('parse_trace', {
+      endpoint: 'getLikesBestEffort',
+      tid,
+      uin,
+      candidate_keys: this.collectPostEntityKeys(tid),
+    });
+    try {
+      const likes = await this.getLikeListBestEffort(uin, tid);
+      const feeds3Failure = this.lastFeeds3FailureByTid.get(tid);
+      if (feeds3Failure) {
+        const kind = this.getApiFailureKind(feeds3Failure);
+        return this.sdkFailure(
+          kind,
+          kind === 'rate_limit',
+          'best_effort',
+          {
+            endpoint: 'getLikesBestEffort',
+            tid,
+            uin,
+            candidateKeys: this.collectPostEntityKeys(tid),
+            message: this.describeApiFailure(feeds3Failure) || 'like read failed',
+          },
+          'feeds3_html',
+          [],
+          diagnostic,
+        );
+      }
+      const meta = this.getPostMeta(tid);
+      const expected = Number(meta?.likenum ?? likes.length);
+      const warnings: string[] = [];
+      let availability: BestEffortAvailability = 'available_full';
+      if (likes.length === 0 && expected > 0) {
+        availability = 'not_embedded';
+        warnings.push('post counts indicate likes exist but html did not embed like detail');
+      } else if (expected > likes.length) {
+        availability = 'available_partial';
+        warnings.push('embedded likes are partial relative to counted likes');
+      }
+      return this.sdkSuccess(
+        { likes, identity: this.buildPostIdentity(tid, uin), availability },
+        likes.length > 0 ? 'feeds3_html' : 'derived',
+        'best_effort',
+        warnings,
+        diagnostic,
+      );
+    } catch (error) {
+      const failure = this.classifySdkFailure(error, 'getLikesBestEffort', uin, tid);
+      failure.diagnostic = diagnostic;
+      return failure;
+    }
+  }
+
+  async getFriendFeedsBestEffort(
+    cursor = '',
+    num = 50,
+    options?: BestEffortOptions,
+  ): Promise<SdkResult<{
+    posts: Record<string, unknown>[];
+    nextCursor?: string;
+    hasMore: boolean;
+  }>> {
+    const diagnostic = this.createDiagnosticRef('parse_trace', {
+      endpoint: 'getFriendFeedsBestEffort',
+      cursor,
+      num,
+    });
+    try {
+      const res = await this.getFriendFeeds(cursor, num, { fastMode: options?.fastMode });
+      if (Number(res.code ?? -1) !== 0) {
+        const kind = this.getApiFailureKind(res);
+        return this.sdkFailure(
+          kind === 'auth' || kind === 'rate_limit' ? kind : 'parse_miss',
+          kind === 'rate_limit',
+          'best_effort',
+          { endpoint: 'getFriendFeedsBestEffort', message: String(res.message ?? 'friend feeds unavailable') },
+          this.inferSdkSource(res._source ?? (res._page_info as Record<string, unknown> | undefined)?.source, 'feeds3_html'),
+          [],
+          diagnostic,
+        );
+      }
+      return this.sdkSuccess(
+        {
+          posts: Array.isArray(res.msglist) ? res.msglist as Record<string, unknown>[] : [],
+          nextCursor: typeof res.next_cursor === 'string' ? res.next_cursor : undefined,
+          hasMore: Boolean(res.has_more ?? res.next_cursor),
+        },
+        this.inferSdkSource(res._source ?? (res._page_info as Record<string, unknown> | undefined)?.source, 'feeds3_html'),
+        'best_effort',
+        [],
+        diagnostic,
+      );
+    } catch (error) {
+      const failure = this.classifySdkFailure(error, 'getFriendFeedsBestEffort');
+      failure.diagnostic = diagnostic;
+      return failure;
+    }
+  }
+
   async uploadImage(imageBase64: string, albumId?: string): Promise<UploadImageResult> {
     this.requireLogin();
     const albumtype = albumId ? 0 : 7;

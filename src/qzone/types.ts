@@ -82,6 +82,12 @@ export interface PostMeta {
   likeUnikey: string;
   likeCurkey: string;
   abstime: number;
+  topicId?: string;
+  detailTid?: string;
+  detailUrl?: string;
+  sourceFkey?: string;
+  cmtnum?: number;
+  likenum?: number;
 }
 
 /** 图片元数据结构 */
@@ -321,6 +327,115 @@ export interface Routes {
   delete_comment: string;
   unlike: string;
   [key: string]: string;
+}
+
+export type SdkSource =
+  | 'official_api'
+  | 'feeds3_html'
+  | 'playwright_feed'
+  | 'act_all_html'
+  | 'cache'
+  | 'derived';
+
+export interface PlaywrightFeedSnapshot {
+  posts: Record<string, unknown>[];
+  networkIntercepted: boolean;
+  domFallbackUsed: boolean;
+  interceptedResponseCount: number;
+  pageUrl: string;
+}
+
+export type SdkReliability = 'strict' | 'best_effort';
+
+export type SdkFailureKind =
+  | 'auth'
+  | 'rate_limit'
+  | 'not_supported'
+  | 'parse_miss'
+  | 'upstream_changed'
+  | 'network';
+
+export type BestEffortAvailability =
+  | 'available_full'
+  | 'available_partial'
+  | 'not_embedded';
+
+export interface DiagnosticRef {
+  diagnostic_id: string;
+  category: 'request_trace' | 'parse_trace' | 'capability_trace' | 'regression_snapshots';
+  path: string;
+  created_at: string;
+}
+
+export interface PostIdentity {
+  canonicalTid: string;
+  uin: string;
+  abstime?: number;
+  sourceFkey?: string;
+  topicId?: string;
+  detailTid?: string;
+  detailUrl?: string;
+  likeUnikey?: string;
+  likeCurkey?: string;
+}
+
+export interface StrictOptions {
+  includeImageData?: boolean;
+  maxPages?: number;
+  cursor?: string;
+  pos?: number;
+  num?: number;
+}
+
+export interface BestEffortOptions {
+  fastMode?: boolean;
+  forceRefresh?: boolean;
+  maxCacheAgeSec?: number;
+  includeImageData?: boolean;
+}
+
+export interface SdkSuccess<T> {
+  ok: true;
+  data: T;
+  source: SdkSource;
+  reliability: SdkReliability;
+  warnings: string[];
+  diagnostic?: DiagnosticRef;
+}
+
+export interface SdkFailure {
+  ok: false;
+  kind: SdkFailureKind;
+  retryable: boolean;
+  details: {
+    endpoint?: string;
+    tid?: string;
+    uin?: string;
+    candidateKeys?: string[];
+    message?: string;
+  };
+  source?: SdkSource;
+  reliability: SdkReliability;
+  warnings: string[];
+  diagnostic?: DiagnosticRef;
+}
+
+export type SdkResult<T> = SdkSuccess<T> | SdkFailure;
+
+export interface CapabilityStatus {
+  name: string;
+  available: boolean;
+  reliability: SdkReliability;
+  source?: SdkSource;
+  warnings: string[];
+  reason?: string;
+}
+
+export interface CapabilityReport {
+  ok: boolean;
+  checkedAt: string;
+  capabilities: CapabilityStatus[];
+  diagnostic?: DiagnosticRef;
 }
 
 // OneBot v11 event shapes

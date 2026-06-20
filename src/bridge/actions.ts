@@ -12,7 +12,6 @@ function debugLog(cachePath: string, payload: { location: string; message: strin
   try {
     fs.appendFileSync(getDebugLogPath(cachePath), JSON.stringify(payload) + '\n');
   } catch (_) {}
-  fetch('http://127.0.0.1:7242/ingest/8be6e162-8615-4320-91d6-a9ff0807a9c9', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }).catch(() => {});
 }
 // #endregion
 import type { BridgeConfig } from './config.js';
@@ -169,6 +168,29 @@ function fail(retcode: number, msg: string, echo?: string): OneBotResponse {
   return { status: 'failed', retcode, data: null, message: msg, echo };
 }
 
+function sdkFailureRetcode(kind: string): number {
+  switch (kind) {
+    case 'auth': return 1401;
+    case 'rate_limit': return 1429;
+    case 'not_supported': return 1404;
+    case 'parse_miss': return 1502;
+    case 'upstream_changed': return 1503;
+    default: return 1500;
+  }
+}
+
+function withSdkMeta(base: Record<string, unknown>, result: Record<string, unknown>): Record<string, unknown> {
+  const out = { ...base };
+  if (typeof result['source'] === 'string') out.source = result['source'];
+  if (typeof result['reliability'] === 'string') out.reliability = result['reliability'];
+  if (Array.isArray(result['warnings'])) out.warnings = result['warnings'];
+  const diagnostic = result['diagnostic'];
+  if (diagnostic && typeof diagnostic === 'object' && typeof (diagnostic as Record<string, unknown>)['diagnostic_id'] === 'string') {
+    out.diagnostic_id = (diagnostic as Record<string, unknown>)['diagnostic_id'];
+  }
+  return out;
+}
+
 /** 将秒级/毫秒级时间戳格式化为便于阅读的 YYYY-MM-DD HH:mm */
 function formatTimestampToReadable(ts: number): string {
   if (!Number.isFinite(ts) || ts <= 0) return '';
@@ -315,8 +337,13 @@ export class ActionHandler {
     const images = (await Promise.all(imageTasks)).filter((image): image is string => !!image);
 
     const whoCanSee = p['who_can_see'] !== undefined ? safeInt(p['who_can_see']) : undefined;
-    const [tid, picIds] = await this.client.publish(text, images.length ? images : undefined, whoCanSee);
-    return ok({ message_id: safeInt(tid), tid, pic_ids: picIds }, echo);
+    const result = await this.client.publishPostStrict(text, images.length ? images : undefined, whoCanSee);
+    if (!result.ok) return fail(sdkFailureRetcode(result.kind), result.details.message ?? result.kind, echo);
+    return ok(withSdkMeta({
+      message_id: safeInt(result.data.tid),
+      tid: result.data.tid,
+      pic_ids: result.data.picIds,
+    }, result as unknown as Record<string, unknown>), echo);
   }
 
   async action_send_group_msg(p: Record<string, unknown>, echo?: string): Promise<OneBotResponse> {
@@ -329,8 +356,9 @@ export class ActionHandler {
     if (!this.client.loggedIn) return fail(1401, '未登录', echo);
     const tid = String(p['message_id'] ?? p['tid'] ?? '');
     if (!tid) return fail(1400, '缺少 message_id', echo);
-    const res = await this.client.deleteEmotion(tid);
-    return (res['code'] as number) === 0 ? ok(null, echo) : fail(1500, String(res['message'] ?? ''), echo);
+    const result = await this.client.deletePostStrict(tid);
+    if (!result.ok) return fail(sdkFailureRetcode(result.kind), result.details.message ?? result.kind, echo);
+    return ok(withSdkMeta({ tid: result.data.tid }, result as unknown as Record<string, unknown>), echo);
   }
 
   // ── like ──────────────────────────────────────
@@ -436,8 +464,12 @@ export class ActionHandler {
     const uin = String(p['user_id'] ?? this.client.qqNumber!);
     const tid = String(p['message_id'] ?? p['tid'] ?? '');
     if (!tid) return fail(1400, '缺少 message_id', echo);
-    const res = await this.client.getShuoshuoDetail(uin, tid);
-    return ok(res, echo);
+    const result = await this.client.getPostDetailBestEffort(uin, tid);
+    if (!result.ok) return fail(sdkFailureRetcode(result.kind), result.details.message ?? result.kind, echo);
+    return ok(withSdkMeta({
+      ...result.data.post,
+      identity: result.data.identity,
+    }, result as unknown as Record<string, unknown>), echo);
   }
 
   async action_get_feed_images(p: Record<string, unknown>, echo?: string): Promise<OneBotResponse> {
@@ -458,12 +490,20 @@ export class ActionHandler {
     const cursorRaw = p['cursor'] ?? p['next_cursor'];
     const cursor =
       cursorRaw != null && String(cursorRaw).trim() !== '' ? String(cursorRaw).trim() : undefined;
-    const res = await this.client.getEmotionList(uin, pos, num, undefined, undefined, undefined, maxPages, cursor);
+    const result = await this.client.getPostsStrict(uin, { maxPages, cursor, pos, num });
+    if (!result.ok) return fail(sdkFailureRetcode(result.kind), result.details.message ?? result.kind, echo);
+    const res: Record<string, unknown> = withSdkMeta({
+      code: 0,
+      message: 'ok',
+      msglist: result.data.posts,
+      has_more: result.data.hasMore,
+      next_cursor: result.data.nextCursor,
+    }, result as unknown as Record<string, unknown>);
     if (res && typeof res === 'object') {
-      ensureReadableTimeOnMsglist(res as Record<string, unknown>);
+      ensureReadableTimeOnMsglist(res);
       const includeImageData = p['include_image_data'] !== false && p['include_image_data'] !== '0';
       if (includeImageData) {
-        await this.enrichMsglistWithImageData(res as Record<string, unknown>, MAX_IMAGE_DATA_PER_POST, MAX_IMAGE_DATA_PER_RESPONSE);
+        await this.enrichMsglistWithImageData(res, MAX_IMAGE_DATA_PER_POST, MAX_IMAGE_DATA_PER_RESPONSE);
       }
     }
     return ok(res, echo);
@@ -604,10 +644,20 @@ export class ActionHandler {
     const pos = safeInt(p['pos'] ?? 0);
     const fastMode = !['0', 'false', 'no'].includes(String(p['fast_mode'] ?? '1').toLowerCase());
     log('INFO', `get_comment_list: tidRaw=${tidRaw} -> tid=${tid} uin=${uin}`);
-    const res = await this.client.getCommentsBestEffort(uin, tid, num, pos, { fastMode });
-    const cnt = [res['commentlist'], res['comment_list'], res['comments'], res['data']].find(Array.isArray) as unknown[] | undefined;
-    log('INFO', `get_comment_list: code=${(res as Record<string, unknown>)['code']} comments=${cnt?.length ?? 0}`);
-    return ok(enrichGetCommentListPayload(res as Record<string, unknown>), echo);
+    const result = await this.client.getCommentsBestEffort({ uin, tid, num, pos, options: { fastMode } });
+    if (!result.ok) return fail(sdkFailureRetcode(result.kind), result.details.message ?? result.kind, echo);
+    const res = withSdkMeta({
+      code: 0,
+      message: result.data.availability === 'not_embedded' ? 'comment detail not embedded in html' : 'ok',
+      commentlist: result.data.comments,
+      comment_list: result.data.comments,
+      comments: result.data.comments,
+      data: result.data.comments,
+      availability: result.data.availability,
+      identity: result.data.identity,
+    }, result as unknown as Record<string, unknown>);
+    log('INFO', `get_comment_list: comments=${result.data.comments.length} availability=${result.data.availability}`);
+    return ok(enrichGetCommentListPayload(res), echo);
   }
 
   async action_get_like_list(p: Record<string, unknown>, echo?: string): Promise<OneBotResponse> {
@@ -621,8 +671,14 @@ export class ActionHandler {
       if (meta) uin = meta.uin;
     }
     if (!uin) uin = this.client.qqNumber!;
-    const list = await this.client.getLikeList(uin, tid);
-    return ok(list, echo);
+    const result = await this.client.getLikesBestEffort(uin, tid);
+    if (!result.ok) return fail(sdkFailureRetcode(result.kind), result.details.message ?? result.kind, echo);
+    return ok(withSdkMeta({
+      list: result.data.likes,
+      likes: result.data.likes,
+      availability: result.data.availability,
+      identity: result.data.identity,
+    }, result as unknown as Record<string, unknown>), echo);
   }
 
   // ── user / social ──────────────────────────────
@@ -830,6 +886,13 @@ export class ActionHandler {
     return ok(routes, echo);
   }
 
+  async action_probe_capabilities(_p: Record<string, unknown>, echo?: string): Promise<OneBotResponse> { /*
+    if (!this.client.loggedIn) return fail(1401, '鏈櫥褰?, echo);
+    */    if (!this.client.loggedIn) return fail(1401, 'not logged in', echo);
+    const report = await this.client.probeCapabilities();
+    return ok(report, echo);
+  }
+
   async action_get_friend_feeds(p: Record<string, unknown>, echo?: string): Promise<OneBotResponse> {
     if (!this.client.loggedIn) return fail(1401, '未登录', echo);
     // #region agent log
@@ -840,9 +903,17 @@ export class ActionHandler {
     const cursor = typeof p['cursor'] === 'string' ? p['cursor'] : '';
     const num = Math.max(1, Math.min(200, safeInt(p['num'] ?? p['count'] ?? 50)));
     const fastMode = !['0', 'false', 'no'].includes(String(p['fast_mode'] ?? '1').toLowerCase());
-    const res = await this.client.getFriendFeeds(cursor, num, { fastMode });
-    if (includeImageData && res && typeof res === 'object') {
-      await this.enrichMsglistWithImageData(res as Record<string, unknown>, MAX_IMAGE_DATA_PER_POST, MAX_IMAGE_DATA_PER_RESPONSE);
+    const result = await this.client.getFriendFeedsBestEffort(cursor, num, { fastMode });
+    if (!result.ok) return fail(sdkFailureRetcode(result.kind), result.details.message ?? result.kind, echo);
+    const res = withSdkMeta({
+      code: 0,
+      message: 'ok',
+      msglist: result.data.posts,
+      has_more: result.data.hasMore,
+      next_cursor: result.data.nextCursor,
+    }, result as unknown as Record<string, unknown>);
+    if (includeImageData) {
+      await this.enrichMsglistWithImageData(res, MAX_IMAGE_DATA_PER_POST, MAX_IMAGE_DATA_PER_RESPONSE);
     }
     return ok(res, echo);
   }

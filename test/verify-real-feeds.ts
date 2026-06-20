@@ -68,7 +68,8 @@ async function main(): Promise<void> {
   console.log(`已登录: uin=${selfUin}\n`);
 
   let allOk = true;
-  let firstTid: string | null = null;
+  let firstTid = '';
+  let firstTidOwner = '';
   const emotionMsglist: Record<string, unknown>[] = [];
   const friendMsglist: Record<string, unknown>[] = [];
 
@@ -82,6 +83,7 @@ async function main(): Promise<void> {
     console.log(`getEmotionList: code=${code} _source=${source} 条数=${msglist.length}`);
     if (msglist.length > 0) {
       firstTid = String(msglist[0]!['tid'] ?? msglist[0]!['cellid'] ?? '');
+      firstTidOwner = String(msglist[0]!['uin'] ?? '');
       const normalized = msglist.map((r) => normalizeEmotion(r, selfUin));
       const humanLike = normalized.filter(checkNormalizedHumanLike);
       const reasonable = msglist.filter(isReasonablePost);
@@ -112,7 +114,10 @@ async function main(): Promise<void> {
       console.log(`  归一化后人发正常动态: ${humanLike.length}/${normalized.length} 条，原始合理: ${reasonable.length}/${msglist.length} 条`);
       const first = msglist[0]!;
       const tid = String(first['tid'] ?? first['cellid'] ?? '');
-      if (!firstTid) firstTid = tid;
+      if (!firstTid) {
+        firstTid = tid;
+        firstTidOwner = String(first['uin'] ?? '');
+      }
       console.log(`  首条: tid=${tid.slice(0, 16)} uin=${first['uin']} content=${summary(String(first['content'] ?? first['con'] ?? ''), 60)}`);
       if (humanLike.length === 0 && msglist.length > 0) allOk = false;
     }
@@ -127,18 +132,29 @@ async function main(): Promise<void> {
   console.log('');
 
   // ── 可选：首条说说的评论/点赞 ──
-  if (firstTid) {
+  const probePost =
+    [...friendMsglist, ...emotionMsglist].find((item) =>
+      Number(item['cmtnum'] ?? 0) > 0 || Number(item['likenum'] ?? 0) > 0,
+    )
+    ?? [...friendMsglist, ...emotionMsglist].find((item) => String(item['tid'] ?? item['cellid'] ?? ''))
+    ?? null;
+  if (probePost) {
+    const probeTid = String(probePost['tid'] ?? probePost['cellid'] ?? firstTid ?? '');
+    const probeUin = String(probePost['uin'] ?? firstTidOwner ?? selfUin);
     try {
-      const commentsRes = await client.getCommentsBestEffort(selfUin, firstTid, 10, 0) as Record<string, unknown>;
+      const commentsRes = await client.getCommentsBestEffort(probeUin, probeTid, 10, 0) as Record<string, unknown>;
+      if (Number(commentsRes['code'] ?? -1) !== 0) {
+        console.log(`getCommentsBestEffort(tid=${probeTid.slice(0, 12)}… uin=${probeUin}): failure_kind=${String(commentsRes['_failure_kind'] ?? 'unknown')} message=${String(commentsRes['message'] ?? '')}`);
+      }
       const commentList = commentsRes['commentlist'] ?? commentsRes['comment_list'] ?? commentsRes['data'] ?? commentsRes['comments'];
       const commentCount = Array.isArray(commentList) ? commentList.length : 0;
-      console.log(`getCommentsBestEffort(tid=${firstTid.slice(0, 12)}…): 评论数=${commentCount}`);
+      console.log(`getCommentsBestEffort(tid=${probeTid.slice(0, 12)}… uin=${probeUin}): 评论数=${commentCount}`);
     } catch (e) {
       console.error('getCommentsBestEffort 异常:', e);
     }
     try {
-      const likes = await client.getLikeListBestEffort(selfUin, firstTid);
-      console.log(`getLikeListBestEffort(tid=${firstTid.slice(0, 12)}…): 点赞数=${likes.length}`);
+      const likes = await client.getLikeListBestEffort(probeUin, probeTid);
+      console.log(`getLikeListBestEffort(tid=${probeTid.slice(0, 12)}… uin=${probeUin}): 点赞数=${likes.length}`);
     } catch (e) {
       console.error('getLikeListBestEffort 异常:', e);
     }

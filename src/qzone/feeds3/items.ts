@@ -777,6 +777,13 @@ export function parseFeeds3Items(
       }
     }
 
+    const topicId = dataAttr(attrs, 'topicid');
+    const detailUrl = searchAfter.match(/data-detailurl="([^"]+)"/i)?.[1] ?? '';
+    const detailTid =
+      detailUrl.match(/\/mood\/([a-z0-9]+)\.1/i)?.[1]
+      ?? topicId.match(/^\d+_([a-z0-9]+)__\d+$/i)?.[1]
+      ?? '';
+
     const isLiked = /data-islike="1"/.test(searchAfter) || /qz_like_btn[^"]*item-on|item-on[^"]*qz_like_btn/.test(searchAfter);
 
     const item: Record<string, unknown> = {
@@ -796,6 +803,10 @@ export function parseFeeds3Items(
       appShareTitle,
       likeUnikey,
       likeCurkey,
+      topicId: topicId || undefined,
+      detailTid: detailTid || undefined,
+      detailUrl: detailUrl || undefined,
+      sourceFkey: dataAttr(attrs, 'fkey') || undefined,
       musicShare,
       isLiked,
       _source: 'feeds3',

@@ -15,6 +15,7 @@
     "typecheck": "tsc --noEmit",
     "verify": "tsx scripts/verify-endpoints.ts",
     "verify:readonly": "tsx scripts/verify-endpoints.ts --skip-write",
+    "like:instant": "tsx scripts/instant-like.ts",
     "verify:http": "tsx scripts/verify-bridge-http.ts",
     "verify:tools": "tsx scripts/verify-all-qzone-tools-http.ts",
     "probe:doc": "tsx scripts/probe-doc-endpoints.ts",

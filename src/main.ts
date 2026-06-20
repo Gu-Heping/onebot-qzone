@@ -122,9 +122,21 @@ async function main(): Promise<void> {
   if (client.loggedIn) {
     // 快速读写探测（写探测会发一条说说再删，默认关闭以免刷屏；需时设 QZONE_STARTUP_WRITE_PROBE=1）
     let readOk = false, writeOk = false;
+    let readProbeLabel = R + '不可用' + W;
     try {
-      const r = await client.getEmotionList(client.qqNumber!, 0, 1) as Record<string, unknown>;
-      readOk = r?.code === 0 && Array.isArray(r?.msglist) && (r.msglist as unknown[]).length > 0;
+      const result = await client.getPostsStrict(client.qqNumber!, { num: 1, maxPages: 1 });
+      if (result.ok) {
+        if (result.data.posts.length > 0) {
+          readOk = true;
+          readProbeLabel = G + 'strict 可用' + W;
+        } else {
+          readProbeLabel = Y + '空列表（非认证失败）' + W;
+        }
+      } else if (result.kind === 'auth') {
+        readProbeLabel = R + 'feeds3 认证失效' + W;
+      } else {
+        readProbeLabel = R + `失败(${result.kind})` + W;
+      }
     } catch { /* ignore */ }
 
     const enableWriteProbe = process.env['QZONE_STARTUP_WRITE_PROBE'] === '1' || process.env['QZONE_STARTUP_WRITE_PROBE'] === 'true';
@@ -156,7 +168,7 @@ async function main(): Promise<void> {
       `登录方式:    ${loginMethod}`,
       `Cookie 数:   ${cookieKeys} 个  p_skey=${hasPskey ? G + '✓' + W : R + '✗' + W}  skey=${hasSkey ? G + '✓' + W : R + '✗' + W}  superkey=${hasSuperkey ? G + '✓' + W : R + '✗' + W}`,
       ``,
-      `读操作测试:  ${readOk ? G + '✓ 成功' + W : R + '✗ 失败' + W}  (getEmotionList)`,
+      `读操作测试:  ${readProbeLabel}  (getPostsStrict)`,
       `写操作测试:  ${writeProbeLabel}  (publish+delete，默认关闭)`,
       ``,
       `自动续期:    ${G}已启用${W}  每 4 小时静默刷新（headless，无需扫码）`,

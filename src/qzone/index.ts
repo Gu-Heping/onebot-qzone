@@ -22,6 +22,19 @@ export type {
   MusicShareMeta,
   PostMeta,
   EmojiInfo,
+  SdkSource,
+  SdkReliability,
+  SdkFailureKind,
+  BestEffortAvailability,
+  DiagnosticRef,
+  PostIdentity,
+  StrictOptions,
+  BestEffortOptions,
+  SdkSuccess,
+  SdkFailure,
+  SdkResult,
+  CapabilityStatus,
+  CapabilityReport,
 } from './types.js';
 // feeds3Parser 使用下划线命名的 EnhancedComment，与 types.ts 中的略有不同
 export type { EnhancedComment } from './feeds3Parser.js';
