@@ -3,26 +3,9 @@
  * 依赖 preprocess、content
  */
 
-import fs from 'node:fs';
-import path from 'node:path';
 import { log, htmlUnescape } from '../utils.js';
 import { preprocessHtml } from './preprocess.js';
 import { extractFeedContentFromHtml } from './content.js';
-
-// #region agent log
-const DEBUG_LOG_PATH = path.join(process.env.QZONE_CACHE_PATH ?? process.cwd(), 'debug.log');
-function debugIngest(message: string, data: Record<string, unknown>, hypothesisId?: string): void {
-  try {
-    const line = JSON.stringify({
-      location: 'feeds3/items.ts',
-      message,
-      data: { ...data, hypothesisId: hypothesisId ?? null },
-      timestamp: Date.now(),
-    }) + '\n';
-    fs.appendFileSync(DEBUG_LOG_PATH, line);
-  } catch (_) {}
-}
-// #endregion
 
 /** 单次解析统计信息 */
 interface ParseStats {
@@ -222,17 +205,6 @@ export function parseFeeds3Items(
     // data-uin 已与 filterUin 对齐时，丢弃会导致「首页明明多条说说、解析只有一条」；仍保留条目（cmtnum/图等可能略弱）。
     if (filterAppid && matchedBlock && matchedBlock.appid !== filterAppid) continue;
 
-    const blockTypeidForLog = matchedBlock?.typeid ?? '';
-    debugIngest('feed_data matchedBlock', {
-      tid,
-      dataUin,
-      hasMatchedBlock: !!matchedBlock,
-      blockOpuin: matchedBlock?.opuin ?? null,
-      blockAppid: matchedBlock?.appid ?? null,
-      blockTypeid: blockTypeidForLog,
-      isForwardLike: blockTypeidForLog === '5' || !!(origTid && origTid !== tid && origUin && origUin !== dataUin),
-    }, 'H1');
-
     const nextFdPos = processedText.indexOf('name="feed_data"', fdPos + 1);
     const prevFdPos = fdPos > 0 ? processedText.lastIndexOf('name="feed_data"', fdPos - 1) : -1;
     const afterEnd = nextFdPos >= 0 ? Math.min(nextFdPos, fdPos + 8000) : Math.min(fdPos + 5000, processedText.length);
@@ -243,17 +215,6 @@ export function parseFeeds3Items(
     const nickBlockAuthor = parseFeeds3FeedAuthorFromBefore(searchBefore);
     let posterUin =
       nickBlockAuthor?.uin && /^\d+$/.test(nickBlockAuthor.uin) ? nickBlockAuthor.uin : dataUin;
-
-    const tagEndForLog = searchAfter.indexOf('>');
-    const nextFeedDataInsideAfter =
-      tagEndForLog >= 0 ? searchAfter.indexOf('name="feed_data"', tagEndForLog + 1) : -1;
-    debugIngest('search range', {
-      tid,
-      nextFdPos: nextFdPos >= 0 ? nextFdPos : -1,
-      afterEndOffset: afterEnd - fdPos,
-      searchAfterLen: searchAfter.length,
-      nextFeedDataInsideAfter,
-    }, 'H2');
 
     let content = '';
     let nickname = '';
@@ -411,15 +372,6 @@ export function parseFeeds3Items(
       content = rt_con;
     }
 
-    debugIngest('content source', {
-      tid,
-      contentLen: content.length,
-      contentSnippet: content.slice(0, 80),
-      hadCmAfter: !!cmAfter,
-      hadCmFInfo: !!cmFInfo,
-      sectionsLength: cmAfter ? (cmAfter[1]!.split(/<a\s+class="nickname/).length) : 0,
-    }, 'H4');
-
     if (matchedBlock?.block) {
       const cmtFromBlock = matchedBlock.block.match(cmtnumFromBlockPat);
       if (cmtFromBlock) cmtnum = parseInt(cmtFromBlock[1]!, 10);
@@ -494,11 +446,9 @@ export function parseFeeds3Items(
       const pickeyTid = picKeyMatch[1]!;
       const originalUrl = picKeyMatch[2]!;
       if (!validTidLike(pickeyTid)) {
-        debugIngest('pickey tid skip', { tid, pickeyTid, dataUin, reason: 'invalid_tid_format' }, 'H3');
         continue;
       }
       if (pickeyTid !== tid) {
-        debugIngest('pickey tid skip', { tid, pickeyTid, dataUin }, 'H3');
         continue;
       }
       if (!images.includes(originalUrl)) {
@@ -736,27 +686,6 @@ export function parseFeeds3Items(
     if (filteredImages.some((u) => u.includes('a1.qpic.cn'))) {
       filteredPicsMeta = filteredPicsMeta.filter((p) => p.url?.includes('a1.qpic.cn'));
     }
-
-    const photoStoreCount = filteredImages.filter((u) => u.includes('photo.store.qq.com')).length;
-    const a1qpicCount = filteredImages.filter((u) => u.includes('a1.qpic.cn')).length;
-    debugIngest('img url source', {
-      tid,
-      imagesRaw: images.length,
-      filteredPicCount: filteredImages.length,
-      domainPhotoStore: photoStoreCount,
-      domainA1qpic: a1qpicCount,
-      sampleUrls: filteredImages.slice(0, 2).map((u) => (u.length > 80 ? u.slice(0, 80) + '...' : u)),
-    }, 'IMG');
-    debugIngest('item summary', {
-      tid,
-      uin: posterUin,
-      contentLen: content.length,
-      contentSnippet: content.slice(0, 60),
-      imagesRaw: images.length,
-      filteredPicCount: filteredImages.length,
-      videoCount: videos.length,
-      regionCurrentLen: regionCurrentDecoded.length,
-    }, 'H5');
 
     let canonicalTid = tid;
     if (/^\d+$/.test(tid)) {

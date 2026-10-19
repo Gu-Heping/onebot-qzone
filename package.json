@@ -1,8 +1,11 @@
 {
   "name": "qzone-onebot-bridge",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "QQ空间 → OneBot v11 Bridge (TypeScript)",
   "type": "module",
+  "engines": {
+    "node": ">=18"
+  },
   "scripts": {
     "dev": "tsx src/main.ts",
     "build": "tsup src/main.ts --format esm --out-dir dist --dts",
@@ -13,9 +16,12 @@
     "test:api:readonly": "tsx test/run-all.ts --api --readonly",
     "test:all": "tsx test/run-all.ts --api",
     "typecheck": "tsc --noEmit",
+    "typecheck:plugin": "tsc -p napcat-plugin/tsconfig.json --noEmit",
     "verify": "tsx scripts/verify-endpoints.ts",
     "verify:readonly": "tsx scripts/verify-endpoints.ts --skip-write",
     "like:instant": "tsx scripts/instant-like.ts",
+    "like:browser": "tsx scripts/like-browser.ts",
+    "login:qr": "tsx scripts/qr-login.ts",
     "verify:http": "tsx scripts/verify-bridge-http.ts",
     "verify:tools": "tsx scripts/verify-all-qzone-tools-http.ts",
     "probe:doc": "tsx scripts/probe-doc-endpoints.ts",

@@ -1,8 +1,14 @@
 # 说说相关接口
 
+> **当前实现状态（2026-10）**：说说列表只走 **feeds3 HTML**（见 [`feeds3-parser.md`](feeds3-parser.md) 与 [`获取说说流程说明.md`](获取说说流程说明.md)）。下文 PC/mobile 接口保留为历史记录；详情仍会先尝试 PC 多变体，但多已失败。
+
 ## 1. 获取说说列表
 
-### PC 端（主用）
+### feeds3 HTML（当前主用）
+
+`feeds3_html_more` 返回 HTML，由 `parseFeeds3Items` 解析。当前 `getEmotionList` 不再调用下面的 `emotion_cgi_msglist_v6`。
+
+### PC 端（历史主用）
 
 **接口**: `emotion_cgi_msglist_v6`
 
@@ -56,7 +62,7 @@
 
 **实机（2026-03-22，`npm run probe:doc`）**: HTTP 200，业务体为 JSONP，`code=-10000`（「使用人数过多，请稍后再试」），与限流语义一致。当前仓库内 **`getEmotionList` 已不再调用本接口**，主路径为 **`feeds3_html_more` + 解析**；详见 [`doc/api-probe-results.md`](api-probe-results.md)。
 
-### 移动端（备选）
+### 移动端（历史备选，当前未使用）
 
 **URL**: `https://mobile.qzone.qq.com/get_mood_list`
 
@@ -78,7 +84,7 @@
 
 ## 2. 获取说说详情
 
-### PC 端（主用，多变体降级）
+### PC 端（历史主用，多变体降级）
 
 **接口**: `emotion_cgi_getdetailv6`
 
@@ -96,25 +102,22 @@
 | `hostuin` | 当前登录 QQ 号 |
 | `qzreferrer` | 来源页面 |
 
-#### GET 方式（5 种参数变体）
+#### GET 方式（2 种参数变体）
 
-基础 URL: `...?g_tk={gtk}&uin={uin}&tid={tid}&format=json`
+基础 URL: `...?g_tk={gtk}&uin={uin}&tid={tid}&format=json&qzonetoken={token}`
 
 | 变体 | 附加参数 |
 |------|---------|
-| 0 | 无 |
-| 1 | `qzonetoken={token}` |
-| 2 | `qzonetoken={token}&qzreferrer={ref}` |
-| 3 | `qzonetoken={token}&hostuin={uin}` |
-| 4 | `qzonetoken={token}&hostuin={uin}&qzreferrer={ref}` |
+| 0 | `hostuin={当前登录号}&qzreferrer={ref}` |
+| 1 | 无（仅 `qzonetoken`） |
 
 系统会记忆上次成功的变体（winning variant），下次优先尝试。
 
-**问题**: GET 请求可能返回 0 字节空响应（taotao proxy 层限制），5 分钟冷却期后才重试 PC 路径。
+**问题**: GET 请求可能返回 0 字节空响应（taotao proxy 层限制），PC 全部失败后进入 5 分钟冷却期。
 
-**实机（2026-03-22）**: 同账号下 **POST / GET 均为 HTTP 500 且空体**（与「空响应」同类故障，但表现为 500）。客户端仍按代码路径尝试，失败则走 mobile 与列表兜底。
+**实机（2026-03-22）**: 同账号下 **POST / GET 均为 HTTP 500 且空体**（与「空响应」同类故障，但表现为 500）。
 
-### 移动端（fallback）
+### 移动端（最后兜底）
 
 **URL**: `https://mobile.qzone.qq.com/detail`
 
@@ -129,9 +132,13 @@
 
 **实机（2026-03-22）**: **HTTP 404、空体**，勿依赖为稳定 fallback。
 
-### 列表 fallback
+### 列表 / act_all fallback
 
-当以上全部失败时，从 `getEmotionList`（feeds3 解析结果）中按 tid 匹配查找。
+1. 从 `getEmotionList`（feeds3 解析结果）中按 tid 匹配查找（会扩大到 80 条并翻页），命中时 `_detail_semantic.source = 'emotion_list_fallback'`。
+2. 仍未命中则 `detailFromActAllMsglist`（`feeds_html_act_all`）兜底。
+3. 全部失败返回最后一次 payload。
+
+> 通过 `routes['detail'] = 'mobile'` 可强制直接走移动端（主要用于探测）。
 
 ---
 

@@ -1,19 +1,10 @@
+import http from 'node:http';
 import https from 'node:https';
 import path from 'node:path';
 import fs from 'node:fs';
 import pLimit from 'p-limit';
 import { QzoneClient } from '../qzone/client.js';
 
-// #region agent log
-function getDebugLogPath(cachePath: string): string {
-  return path.join(cachePath, 'debug.log');
-}
-function debugLog(cachePath: string, payload: { location: string; message: string; data: Record<string, unknown>; timestamp: number; hypothesisId?: string }): void {
-  try {
-    fs.appendFileSync(getDebugLogPath(cachePath), JSON.stringify(payload) + '\n');
-  } catch (_) {}
-}
-// #endregion
 import type { BridgeConfig } from './config.js';
 import type { EventHub } from './hub.js';
 import type { EventPoller } from './poller.js';
@@ -895,11 +886,8 @@ export class ActionHandler {
 
   async action_get_friend_feeds(p: Record<string, unknown>, echo?: string): Promise<OneBotResponse> {
     if (!this.client.loggedIn) return fail(1401, '未登录', echo);
-    // #region agent log
     const rawInc = p['include_image_data'];
     const includeImageData = rawInc !== false && rawInc !== '0';
-    debugLog(this.config.cachePath, { location: 'actions.ts:action_get_friend_feeds', message: 'include_image_data param', data: { raw: rawInc, resolved: includeImageData, willEnrich: includeImageData }, timestamp: Date.now(), hypothesisId: 'H1' });
-    // #endregion
     const cursor = typeof p['cursor'] === 'string' ? p['cursor'] : '';
     const num = Math.max(1, Math.min(200, safeInt(p['num'] ?? p['count'] ?? 50)));
     const fastMode = !['0', 'false', 'no'].includes(String(p['fast_mode'] ?? '1').toLowerCase());
@@ -925,7 +913,7 @@ export class ActionHandler {
     const list = url ? [url] : urls;
     if (!list || list.length === 0) return fail(1400, '缺少 url 或 urls', echo);
     for (const u of list) {
-      if (!isQzoneImageUrl(u)) return fail(1403, '仅允许 QZone CDN 白名单 URL（qpic.cn、photo.store.qq.com、qzonestyle.gtimg.cn）', echo);
+      if (!isQzoneImageUrl(u)) return fail(1403, '仅允许 QZone CDN 白名单 URL（qpic.cn、photo.store.qq.com、qlogo*.store.qq.com、qzonestyle.gtimg.cn）', echo);
     }
     if (list.length === 1) {
       try {
@@ -954,27 +942,12 @@ export class ActionHandler {
     maxTotal: number,
   ): Promise<void> {
     const msglist = res['msglist'] as Record<string, unknown>[] | undefined;
-    const hasMsglist = Array.isArray(msglist);
-    const msglistLen = hasMsglist ? msglist!.length : 0;
-    const hasData = res['data'] != null;
-    // #region agent log
-    debugLog(this.config.cachePath, { location: 'actions.ts:enrichMsglistWithImageData', message: 'msglist source', data: { hasMsglist, msglistLen, hasData, keys: Object.keys(res).slice(0, 20) }, timestamp: Date.now(), hypothesisId: 'H3' });
-    // #endregion
-    if (!hasMsglist) return;
+    if (!Array.isArray(msglist)) return;
     let totalFetched = 0;
-    let firstItemPicLogged = false;
     for (const item of msglist!) {
       if (totalFetched >= maxTotal) break;
       const pic = item['pic'] as Array<unknown> | undefined;
       const picArr = Array.isArray(pic) ? pic : [];
-      if (!firstItemPicLogged && picArr.length > 0) {
-        firstItemPicLogged = true;
-        const firstUrl = getPicUrl(picArr[0]);
-        const whitelist = firstUrl ? isQzoneImageUrl(firstUrl) : false;
-        // #region agent log
-        debugLog(this.config.cachePath, { location: 'actions.ts:enrichMsglistWithImageData', message: 'first item pic', data: { picLen: picArr.length, firstUrl: firstUrl ? firstUrl.slice(0, 80) : null, whitelist }, timestamp: Date.now(), hypothesisId: 'H2' });
-        // #endregion
-      }
       if (picArr.length === 0) continue;
       let perPost = 0;
       for (let i = 0; i < picArr.length && perPost < maxPerPost && totalFetched < maxTotal; i++) {
@@ -989,33 +962,11 @@ export class ActionHandler {
           (obj as Record<string, unknown>)['content_type'] = contentType;
           perPost++;
           totalFetched++;
-          // #region agent log
-          if (totalFetched === 1) {
-            debugLog(this.config.cachePath, { location: 'actions.ts:enrichMsglistWithImageData', message: 'first fetch ok', data: { totalFetched, base64Len: b64.length }, timestamp: Date.now(), hypothesisId: 'H2' });
-          }
-          // #endregion
-        } catch (e) {
-          // #region agent log
-          debugLog(this.config.cachePath, { location: 'actions.ts:enrichMsglistWithImageData', message: 'fetchImageWithAuth failed', data: { url: url.slice(0, 90), err: String(e) }, timestamp: Date.now(), hypothesisId: 'H4' });
-          // #endregion
+        } catch {
+          /* skip failed image */
         }
       }
     }
-    // #region agent log
-    let sampleBase64Len = 0;
-    for (const item of msglist!) {
-      const pic = item['pic'] as Array<unknown> | undefined;
-      if (Array.isArray(pic) && pic.length > 0) {
-        const first = pic[0];
-        const b64 = typeof first === 'object' && first && (first as Record<string, unknown>)['base64'];
-        if (typeof b64 === 'string') {
-          sampleBase64Len = b64.length;
-          break;
-        }
-      }
-    }
-    debugLog(this.config.cachePath, { location: 'actions.ts:enrichMsglistWithImageData', message: 'enrich done', data: { totalFetched, sampleBase64Len }, timestamp: Date.now(), hypothesisId: 'H3' });
-    // #endregion
   }
 
   // ── util ─────────────────────────────────────────
@@ -1063,7 +1014,7 @@ export class ActionHandler {
     for (let attempt = 0; attempt <= SEND_IMAGE_FETCH_RETRIES; attempt++) {
       try {
         const buffer = await new Promise<Buffer>((resolve, reject) => {
-          const mod = url.startsWith('https') ? https : (require('node:http') as typeof https);
+          const mod = url.startsWith('https') ? https : http;
           const req = mod.get(url, { timeout: 15000 }, (res) => {
             if ((res.statusCode ?? 0) >= 400) {
               reject(new Error(`HTTP ${res.statusCode}`));

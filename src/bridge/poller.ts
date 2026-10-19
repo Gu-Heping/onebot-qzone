@@ -7,6 +7,17 @@ import {
   seenLookupKeysForPost,
 } from './stablePostKey.js';
 import { commentDedupMark, commentDedupSeen } from './commentDedup.js';
+import {
+  completeCommentBaseline,
+  completeLikeBaseline,
+  createBaselineState,
+  initializeInteractiveBaseline,
+  isCommentBaselinePending,
+  isLikeBaselinePending,
+  normalizeBaselineState,
+  pruneBaselinePending,
+  type BaselineState,
+} from './firstRunBaseline.js';
 import { safeInt } from './utils.js';
 import { htmlUnescape, log } from '../qzone/utils.js';
 import { processEmojis, parseEmojis, type EmojiConvertOptions } from '../qzone/emoji.js';
@@ -16,7 +27,7 @@ import pLimit from 'p-limit';
 import type {
   OneBotEvent, NormalizedItem, QzoneComment, QzoneLike,
 } from '../qzone/types.js';
-import { readFileSync, writeFileSync, mkdirSync, renameSync } from 'fs';
+import { readFileSync, writeFileSync, mkdirSync, renameSync, existsSync } from 'fs';
 import { join } from 'path';
 
 // ─────────────────────────────────────────────────────────
@@ -479,6 +490,8 @@ export class EventPoller {
   private commentWarmTids = new Set<string>();
   private trackTids: Set<string> = new Set();
   private knownCounts = new Map<string, { comment: number; like: number }>();  // tid → counts from qz_opcnt2
+  /** 首次启动基线状态；关闭 ONEBOT_BASELINE_ON_FIRST_RUN 时为 null */
+  private baseline: BaselineState | null = null;
   private lastError = 0;
   private backoff = 0;
   private statusOk = false;
@@ -530,6 +543,61 @@ export class EventPoller {
 
   private get interactiveStateFile(): string {
     return join(this.config.cachePath, 'seen_interactive_state.json');
+  }
+
+  private get baselineStateFile(): string {
+    return join(this.config.cachePath, 'baseline_state.json');
+  }
+
+  /**
+   * 首启基线：只记录当前已在列表中的帖子/评论/点赞，不推送。
+   * 已有旧版 seen 文件时视为已建立基线，避免升级后重复静默。
+   */
+  private loadBaselineState(): void {
+    if (!this.config.baselineOnFirstRun) {
+      this.baseline = null;
+      return;
+    }
+    const postsSeen = existsSync(this.seenTidsFile);
+    const interactiveSeen = existsSync(this.interactiveStateFile);
+    let state: BaselineState | null = null;
+    let loaded = false;
+    if (existsSync(this.baselineStateFile)) {
+      try {
+        state = normalizeBaselineState(JSON.parse(readFileSync(this.baselineStateFile, 'utf-8')));
+        loaded = true;
+      } catch {
+        state = null;
+      }
+    }
+    if (!state) state = createBaselineState({ postsSeen, interactiveSeen });
+
+    // 仅在新建立基线状态时对账旧版 seen 文件；已加载的 pending 必须保留以支持崩溃续跑。
+    if (!loaded) {
+      state.postsDone = postsSeen;
+      state.friendFeedsDone = postsSeen;
+      state.interactiveInitialized = interactiveSeen;
+      state.pendingComments = [];
+      state.pendingLikes = [];
+    }
+
+    this.baseline = state;
+    this.saveBaselineState();
+    if (!state.postsDone || !state.interactiveInitialized || state.pendingComments.length > 0 || state.pendingLikes.length > 0) {
+      log('INFO', `[Poller] 首次启动基线: postsDone=${state.postsDone} interactive=${state.interactiveInitialized} pendingComments=${state.pendingComments.length} pendingLikes=${state.pendingLikes.length}（可用 ONEBOT_BASELINE_ON_FIRST_RUN=0 回放历史）`);
+    }
+  }
+
+  private saveBaselineState(): void {
+    if (!this.baseline) return;
+    try {
+      mkdirSync(this.config.cachePath, { recursive: true });
+      const tmp = `${this.baselineStateFile}.tmp`;
+      writeFileSync(tmp, JSON.stringify(this.baseline, null, 2), 'utf-8');
+      renameSync(tmp, this.baselineStateFile);
+    } catch (e) {
+      console.error('[Poller] saveBaselineState failed:', e);
+    }
   }
 
   /** 重启后恢复已见评论/点赞与计数，避免把历史当成新事件重复推送 */
@@ -609,6 +677,7 @@ export class EventPoller {
     // 加载持久化的已见 tid，防止重启后重复推送
     this.loadSeenTids();
     this.loadInteractiveState();
+    this.loadBaselineState();
     // add seeded tids
     for (const tid of this.hub.getSeedTids()) this.trackTids.add(tid);
 
@@ -639,6 +708,7 @@ export class EventPoller {
       this.interactiveSaveTimer = null;
     }
     this.flushInteractiveStateToDisk();
+    this.saveBaselineState();
   }
 
   // ── 独立定时器调度 ──────────────────────────────
@@ -835,11 +905,32 @@ export class EventPoller {
 
     const items: NormalizedItem[] = [];
     let rawList: Record<string, unknown>[] = [];
+    let fetchOk = false;
     try {
       const res = await this.client.getEmotionList(selfId, 0, 20);
       rawList = Array.isArray(res['msglist']) ? (res['msglist'] as Record<string, unknown>[]) : [];
       for (const r of rawList) items.push(normalizeEmotion(r, selfId));
+      fetchOk = true;
     } catch { /* skip */ }
+
+    if (fetchOk && this.baseline && !this.baseline.postsDone) {
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i]!;
+        const r = rawList[i];
+        if (!item.tid || !r) continue;
+        this.cacheNormalizedItem(item);
+        this.trackTids.add(item.tid);
+        this.markSeenPostItem(item, r);
+      }
+      this.flushSeenTidsImmediate();
+      this.baseline.postsDone = true;
+      this.saveBaselineState();
+      log('INFO', `[Poller] 首启基线：已记录 ${items.length} 条历史说说，不推送`);
+    }
+    if (fetchOk && this.baseline && !this.baseline.interactiveInitialized) {
+      initializeInteractiveBaseline(this.baseline, this.trackTids);
+      this.saveBaselineState();
+    }
 
     this.logEventDebug(`[Poller:DEBUG] pollMyPosts got ${items.length} items, seenTids=${this.seenPostTids.size}, trackTids=${this.trackTids.size}`);
     for (let i = 0; i < items.length; i++) {
@@ -882,6 +973,18 @@ export class EventPoller {
     try {
       const res = await this.client.getFriendFeeds('', 20);
       const raw = Array.isArray(res['msglist']) ? (res['msglist'] as Record<string, unknown>[]) : [];
+      if (this.baseline && !this.baseline.friendFeedsDone) {
+        for (const r of raw) {
+          const item = normalizeEmotion(r, selfId);
+          if (!item.tid || !item.uin) continue;
+          this.cacheNormalizedItem(item);
+          this.markSeenPostItem(item, r);
+        }
+        this.flushSeenTidsImmediate();
+        this.baseline.friendFeedsDone = true;
+        this.saveBaselineState();
+        log('INFO', `[Poller] 首启基线：已记录 ${raw.length} 条好友动态，不推送`);
+      }
       for (const r of raw) {
         const item = normalizeEmotion(r, selfId);
         if (!item.tid || !item.uin) continue;
@@ -939,6 +1042,16 @@ export class EventPoller {
     this.knownCounts.set(tid, { comment: safeCount, like: 0 });
   }
 
+  private seedKnownLikeCount(tid: string, count: number | undefined): void {
+    const safeCount = Math.max(0, count || 0);
+    const existing = this.knownCounts.get(tid);
+    if (existing) {
+      existing.like = Math.max(existing.like, safeCount);
+      return;
+    }
+    this.knownCounts.set(tid, { comment: 0, like: safeCount });
+  }
+
   private async pollComments(selfUin: string, tid: string): Promise<void> {
     const seenForTid = this.seenCommentIds.get(tid);
     const isWarm = this.commentWarmTids.has(tid) || !!(seenForTid && seenForTid.size > 0);
@@ -957,6 +1070,29 @@ export class EventPoller {
     }
 
     this.logEventDebug(`[Poller:DEBUG] pollComments tid=${tid.slice(0,8)} got ${rawComments.length} comments`);
+
+    if (this.baseline && isCommentBaselinePending(this.baseline, tid)) {
+      this.commentWarmTids.add(tid);
+      this.seedKnownCommentCount(tid, rawComments.length);
+      try {
+        const traffic = await this.client.getTrafficData(selfUin, tid);
+        this.seedKnownCommentCount(tid, traffic.comment);
+        this.seedKnownLikeCount(tid, traffic.like);
+      } catch { /* 计数兜底不可用不影响基线 */ }
+      if (!this.seenCommentIds.has(tid)) this.seenCommentIds.set(tid, new Set());
+      const seenSet = this.seenCommentIds.get(tid)!;
+      for (const raw of rawComments) {
+        const comment = normalizeComment(raw);
+        if (!comment.commentId) continue;
+        commentDedupMark(seenSet, tid, comment);
+      }
+      completeCommentBaseline(this.baseline, tid);
+      this.saveBaselineState();
+      this.requestInteractiveStateSave();
+      log('INFO', `[Poller] 首启基线：已记录 tid=${tid.slice(0, 8)} 的 ${rawComments.length} 条历史评论，不推送`);
+      return;
+    }
+
     if (rawComments.length > 0) {
       this.commentWarmTids.add(tid);
       this.seedKnownCommentCount(tid, rawComments.length);
@@ -987,6 +1123,29 @@ export class EventPoller {
   private async pollLikes(selfUin: string, tid: string): Promise<void> {
     // 使用 bestEffort 获取点赞列表（带多级降级）
     const rawLikes = await this.client.getLikeListBestEffort(selfUin, tid);
+    if (this.baseline && isLikeBaselinePending(this.baseline, tid)) {
+      if (!this.seenLikeUins.has(tid)) this.seenLikeUins.set(tid, new Set());
+      const seenSet = this.seenLikeUins.get(tid)!;
+      for (const raw of rawLikes) {
+        const like = normalizeLike(raw);
+        if (like.uin) seenSet.add(like.uin);
+      }
+      this.pendingLikeUsers.set(tid, rawLikes.map(r => ({
+        uin: String(r['uin'] ?? r['fuin'] ?? ''),
+        nickname: String(r['name'] ?? r['nick'] ?? r['nickname'] ?? ''),
+      })).filter(u => u.uin));
+      this.seedKnownLikeCount(tid, rawLikes.length);
+      try {
+        const traffic = await this.client.getTrafficData(selfUin, tid);
+        this.seedKnownCommentCount(tid, traffic.comment);
+        this.seedKnownLikeCount(tid, traffic.like);
+      } catch { /* 计数兜底不可用不影响基线 */ }
+      completeLikeBaseline(this.baseline, tid);
+      this.saveBaselineState();
+      this.requestInteractiveStateSave();
+      log('INFO', `[Poller] 首启基线：已记录 tid=${tid.slice(0, 8)} 的 ${rawLikes.length} 个历史点赞，不推送`);
+      return;
+    }
     if (rawLikes.length > 0) {
       for (const raw of rawLikes) {
         const like = normalizeLike(raw);
@@ -1085,6 +1244,9 @@ export class EventPoller {
         this.pendingLikeUsers.delete(tid);
         this.knownCounts.delete(tid);
       }
+    }
+    if (this.baseline && pruneBaselinePending(this.baseline, this.trackTids)) {
+      this.saveBaselineState();
     }
   }
 

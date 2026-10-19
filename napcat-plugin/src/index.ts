@@ -45,11 +45,14 @@ async function forwardToBridge(
   bridgeRest: string,
   action: string,
   params: Record<string, unknown>,
+  accessToken: string,
 ): Promise<unknown> {
   const url = new URL(`/${action}`, bridgeRest);
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (accessToken) headers['Authorization'] = `Bearer ${accessToken}`;
   const resp = await fetch(url.toString(), {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     body: JSON.stringify(params),
     signal: AbortSignal.timeout(15000),
   });
@@ -97,7 +100,7 @@ export const plugin_init = async (ctx: NapCatContext): Promise<void> => {
     for (const [k, v] of url.searchParams) params[k] = v;
 
     try {
-      const data = await forwardToBridge(bridgeRest, action, params);
+      const data = await forwardToBridge(bridgeRest, action, params, accessToken);
       jsonResponse(res, 200, data);
     } catch (err) {
       jsonResponse(res, 200, makeResponse({ error: String(err) }, false, 1));
@@ -110,20 +113,26 @@ export const plugin_init = async (ctx: NapCatContext): Promise<void> => {
   // ── Bridge event WS connection (with auto-reconnect) ──
   let bridgeWs: WebSocket | null = null;
   let stopped = false;
+  let reconnectTimer: NodeJS.Timeout | null = null;
 
   function connectBridge(): void {
     if (stopped) return;
-    bridgeWs = new WebSocket(bridgeWsEvent);
-    bridgeWs.on('open', () => ctx.logger.log(`[qzone-plugin] 连接到 bridge 事件流: ${bridgeWsEvent}`));
-    bridgeWs.on('message', (data) => {
+    const ws = new WebSocket(bridgeWsEvent, {
+      headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {},
+    });
+    bridgeWs = ws;
+    ctx._qzoneBridgeWs = ws;
+    ws.on('open', () => ctx.logger.log(`[qzone-plugin] 连接到 bridge 事件流: ${bridgeWsEvent}`));
+    ws.on('message', (data) => {
       const msg = data.toString();
       for (const client of wss.clients) {
         if (client.readyState === WebSocket.OPEN) client.send(msg);
       }
     });
-    bridgeWs.on('error', (err) => ctx.logger.error('[qzone-plugin] bridge ws error:', err));
-    bridgeWs.on('close', () => {
-      if (!stopped) setTimeout(connectBridge, reconnectDelay);
+    ws.on('error', (err) => ctx.logger.error('[qzone-plugin] bridge ws error:', err));
+    ws.on('close', () => {
+      if (bridgeWs === ws) bridgeWs = null;
+      if (!stopped) reconnectTimer = setTimeout(connectBridge, reconnectDelay);
     });
   }
   connectBridge();
@@ -136,7 +145,13 @@ export const plugin_init = async (ctx: NapCatContext): Promise<void> => {
   ctx._qzoneBridgeWs = bridgeWs ?? undefined;
 
   // cleanup hook：把 stopped 闭包暴露出去
-  (ctx as unknown as Record<string, unknown>)['_qzoneBridgeStopped'] = () => { stopped = true; };
+  (ctx as unknown as Record<string, unknown>)['_qzoneBridgeStopped'] = () => {
+    stopped = true;
+    if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+    for (const client of wss.clients) {
+      try { client.terminate(); } catch { /* ignore */ }
+    }
+  };
 };
 
 // ──────────────────────────────────────────────
@@ -145,7 +160,7 @@ export const plugin_init = async (ctx: NapCatContext): Promise<void> => {
 export const plugin_cleanup = (ctx: NapCatContext): void => {
   const stopFn = (ctx as unknown as Record<string, unknown>)['_qzoneBridgeStopped'];
   if (typeof stopFn === 'function') stopFn();
-  ctx._qzoneBridgeWs?.close();
+  try { ctx._qzoneBridgeWs?.terminate(); } catch { /* ignore */ }
   ctx._qzoneBridgeServer?.close();
 };
 

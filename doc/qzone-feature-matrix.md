@@ -1,5 +1,6 @@
 # QQ 空间功能全景表
 
+> **当前实现状态（2026-10）**：说说/评论/点赞的读取均以 **feeds3 HTML** 为准；本表已同步。  
 > 本表列出 QQ 空间 Web/移动端常见功能与当前 bridge 实现状态，用于「逆向直到实现所有功能」的路线图。  
 > 实现流程见 [逆向与实现指南](reverse-engineering-guide.md)。
 
@@ -18,30 +19,31 @@
 
 | 功能 | 状态 | 接口/实现 | 备注 |
 |------|------|-----------|------|
-| 说说列表 | ✅ | emotion_cgi_msglist_v6 → feeds3 fallback | 限流时降级 feeds3 |
-| 说说详情 | ✅ | getdetailv6 多变体 + mobile | winning variant 记忆 |
+| 说说列表 | ✅ | **feeds3_html_more + parseFeeds3Items** | 不再调用 emotion_cgi_msglist_v6 |
+| 说说详情 | ✅ | getdetailv6 多变体 → mobile → feeds3 列表匹配 | winning variant 记忆；PC 实机多失败 |
 | 发布说说 | ✅ | emotion_cgi_publish_v6 | 支持图片 |
 | 删除说说 | ✅ | emotion_cgi_delete_v6 | |
 | 转发说说 | ✅ | emotion_cgi_forward_v6 → re_feeds(forward=1) | |
 | 视频说说解析 | ✅ | feeds3 中 f-ct-video / 详情 | feed_type / video_url 等 |
 | **发说说时 @ 人** | ✅ 已实现 | `con` 内嵌 `@{uin:QQ号,nick:昵称}`，publish 原样传递 | 见 emotion-api.md §3 |
+| **即时点赞（Playwright 优先）** | ✅ | `scripts/instant-like.ts` + `src/bridge/instant-like-*.ts` | 四种 feed source；见 [docs/INSTANT_LIKE.md](../docs/INSTANT_LIKE.md) |
 
 ## 二、评论
 
 | 功能 | 状态 | 接口/实现 | 备注 |
 |------|------|-----------|------|
-| 获取评论列表 | ✅ | getcmtreply_v6 多变体 → mobile | |
-| 发表评论 | ✅ | emotion_cgi_re_feeds | 含回复评论 commentId/replyUin |
-| 删除评论 | ✅ | cgi_qzsharedeletecomment (sns) → emotion_cgi_delcomment_ugc / mobile del_comment | |
-| **评论点赞** | ❌ 未实现 | 网页端无入口，可能仅移动端支持；若需实现需在移动端抓包 | 见 social-api.md §6 |
+| 获取评论列表 | ✅ | **feeds3：好友流 → 作者 scope=1 → feeds_html_act_all 分页** | 老帖可能 `not_embedded`，只能依赖计数 |
+| 发表评论 | ✅ | emotion_cgi_re_feeds（user → h5） | 含回复评论 commentId/replyUin、表情转换、@ 提及 |
+| 删除评论 | ✅ | cgi_qzsharedeletecomment (sns) → emotion_cgi_delcomment_ugc；路由可覆盖为 mobile | |
+| **评论点赞** | ❌ 未实现 | 网页端无入口，可能仅移动端支持；若需实现需在移动端抓包 | 无预留 client/action |
 
 ## 三、点赞（说说）
 
 | 功能 | 状态 | 接口/实现 | 备注 |
 |------|------|-----------|------|
-| 点赞说说 | ✅ | like_cgi_likev6 / internal_dolike_app | |
-| 取消点赞 | ✅ | internal_dolike_app(active=0) 等 | |
-| 点赞列表 | ✅ | like_cgi_getlikev2 等 | get_like_list |
+| 点赞说说 | ✅ | internal_dolike_app → like_cgi_likev6 → mobile；Playwright 点击路径 | |
+| 取消点赞 | ✅ | internal_dolike_app → like_cgi_likev6(optype=1) → mobile(active=1) | |
+| 点赞列表 | ✅ | **feeds3 解析（作者 scope=1 → 好友流）** | 计数由 qz_opcnt2 兜底；可能少于计数 |
 
 ## 四、社交与用户
 
@@ -84,7 +86,7 @@
 |------|------|-----------|------|
 | 签到 | ❌ | 待抓包 | 签到状态/执行签到 |
 | 礼物/送礼 | ❌ | 待抓包 | 送礼、礼物墙 |
-| 表情评论 / @ 人 | ❌ | 待抓包 | 增强互动，若有独立 cgi |
+| 表情评论 / @ 人 | ✅ | 评论发送前转换 emoji + 回复时自动 @ | 无需独立 cgi |
 | 消息/私信 | ❌ | 待确认 | 空间消息中心是否开放 |
 | 空间装扮 | ❌ | 通常不纳入 bridge | 可选 P3 |
 

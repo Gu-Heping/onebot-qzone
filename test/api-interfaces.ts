@@ -31,6 +31,7 @@ const PORT = (() => {
   return i >= 0 && ARGS[i + 1] ? Number(ARGS[i + 1]) : 8080;
 })();
 const BASE = `http://127.0.0.1:${PORT}`;
+const ACCESS_TOKEN = process.env['ONEBOT_ACCESS_TOKEN'] ?? '';
 const RATE_MS = 800;
 
 // ─── helpers ───────────────────────────────────────────────────────────────
@@ -44,9 +45,11 @@ async function call(action: string, params: Record<string, unknown> = {}): Promi
   const now = Date.now();
   if (now - lastCall < RATE_MS) await sleep(RATE_MS - (now - lastCall));
   lastCall = Date.now();
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (ACCESS_TOKEN) headers['Authorization'] = `Bearer ${ACCESS_TOKEN}`;
   const res = await fetch(`${BASE}/${action}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     body: JSON.stringify(params),
   });
   return res.json();

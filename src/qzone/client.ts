@@ -773,12 +773,6 @@ export class QzoneClient {
    * 否则关闭环境变量代理（proxy: false），确保代理路径单一。
    */
   async fetchImageWithAuth(url: string): Promise<{ data: Buffer; contentType: string }> {
-    // #region agent log
-    try {
-      const payload = { location: 'client.ts:fetchImageWithAuth', message: 'proxy config', data: { hasImageProxyUrl: !!this.config.imageProxyUrl, imageProxyPrefix: this.config.imageProxyUrl ? this.config.imageProxyUrl.slice(0, 28) : null }, timestamp: Date.now(), hypothesisId: 'H1' as const };
-      fs.appendFileSync(path.join(this.config.cachePath, 'debug.log'), JSON.stringify(payload) + '\n');
-    } catch (_) {}
-    // #endregion
     // photo.store.qq.com 对 HTTP 常返回 502，统一用 HTTPS 请求
     const requestUrl = url.includes('photo.store.qq.com') && url.startsWith('http://')
       ? url.replace(/^http:\/\//i, 'https://')
@@ -846,10 +840,6 @@ export class QzoneClient {
         const retryable = isRetryableNetworkError(err);
         const finalAttempt = attempt >= retries;
         if (!retryable || finalAttempt) {
-          // #region agent log
-          const payload = { location: 'client.ts:fetchImageWithAuth', message: 'non-200 or empty', data: { status: (err as Record<string, unknown>)?.response ? ((err as Record<string, unknown>).response as Record<string, unknown>)?.status : null, attempts: attempt + 1, urlPrefix: url.slice(0, 70), errMsg: String((err as Error)?.message ?? '').slice(0, 120) }, timestamp: Date.now(), hypothesisId: 'H4' as const };
-          try { fs.appendFileSync(path.join(this.config.cachePath, 'debug.log'), JSON.stringify(payload) + '\n'); } catch (_) {}
-          // #endregion
           throw err;
         }
         const backoff = 250 * Math.pow(2, attempt) + Math.floor(Math.random() * 120);
@@ -2934,13 +2924,6 @@ export class QzoneClient {
   async getFriendFeeds(cursor = '', num = 50, opts?: { fastMode?: boolean }): Promise<ApiResponse> {
     this.requireLogin();
     const fastMode = opts?.fastMode === true;
-    // #region agent log
-    const loginUin = this.qqNumber ?? '';
-    try {
-      const payload = { location: 'client.ts:getFriendFeeds', message: 'request params', data: { scope: 0, requestUinMasked: loginUin ? `${loginUin.slice(0, -2)}**` : '', cursorLen: cursor.length, fastMode }, timestamp: Date.now(), hypothesisId: 'H5' as const };
-      fs.appendFileSync(path.join(this.config.cachePath, 'debug.log'), JSON.stringify(payload) + '\n');
-    } catch (_) {}
-    // #endregion
     const EXCLUDED_APPIDS = new Set(['217']);
     const want = Math.max(1, Math.min(200, num));
     const seenTids = new Set<string>();
@@ -3016,13 +2999,6 @@ export class QzoneClient {
 
       const msglist = merged.slice(0, want);
       const has_more = Boolean(nextCursor);
-      // #region agent log
-      const authors = msglist.slice(0, 5).map((m) => ({ uin: m['uin'], opuin: m['opuin'], tid: m['tid'] }));
-      const isSelf = loginUin && authors.some((a) => String(a.uin ?? a.opuin ?? '') === loginUin);
-      try {
-        fs.appendFileSync(path.join(this.config.cachePath, 'debug.log'), JSON.stringify({ location: 'client.ts:getFriendFeeds', message: 'msglist authors', data: { total: msglist.length, authors, loginUinMasked: loginUin ? `${loginUin.slice(0, -2)}**` : '', isAllSelf: isSelf }, timestamp: Date.now(), hypothesisId: 'H5' }) + '\n');
-      } catch (_) {}
-      // #endregion
       log('DEBUG', `getFriendFeeds: scope=0 total ${msglist.length} posts (excl. activity), next_cursor=${nextCursor || '(end)'}`);
       return {
         code: 0,

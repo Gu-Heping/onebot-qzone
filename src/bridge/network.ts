@@ -47,6 +47,9 @@ export class NetworkManager {
   private limit = pLimit(10);
   private wsConnections: WebSocket[] = [];
   private eventCb: EventCallback | null = null;
+  private stopped = true;
+  private sleepTimer: NodeJS.Timeout | null = null;
+  private sleepResolve: (() => void) | null = null;
 
   constructor(
     private readonly config: BridgeConfig,
@@ -55,6 +58,7 @@ export class NetworkManager {
   ) {}
 
   start(): void {
+    this.stopped = false;
     if (
       this.config.httpPostUrls.length === 0 &&
       this.config.wsReverseUrls.length === 0 &&
@@ -96,23 +100,39 @@ export class NetworkManager {
   }
 
   stop(): void {
+    this.stopped = true;
+    if (this.sleepTimer) { clearTimeout(this.sleepTimer); this.sleepTimer = null; }
+    if (this.sleepResolve) { const resolve = this.sleepResolve; this.sleepResolve = null; resolve(); }
     if (this.eventCb) { this.hub.unsubscribe(this.eventCb); this.eventCb = null; }
     for (const ws of this.wsConnections) {
-      try { ws.close(1000); } catch { /* ignore */ }
+      try { ws.terminate(); } catch { /* ignore */ }
     }
     this.wsConnections = [];
   }
 
+  private sleep(ms: number): Promise<void> {
+    if (this.stopped) return Promise.resolve();
+    return new Promise(resolve => {
+      this.sleepResolve = resolve;
+      this.sleepTimer = setTimeout(() => {
+        this.sleepTimer = null;
+        this.sleepResolve = null;
+        resolve();
+      }, ms);
+    });
+  }
+
   private async wsReverseLoop(url: string, role: 'universal' | 'api' | 'event'): Promise<void> {
     const intervalMs = this.config.wsReverseReconnectInterval * 1000;
-    while (true) {
+    while (!this.stopped) {
       try {
         await this.connectReverseWs(url, role);
       } catch {
         /* ignore */
       }
+      if (this.stopped) break;
       log('DEBUG', `[WS反向] 断开，${this.config.wsReverseReconnectInterval}s 后重连 ${url}`);
-      await new Promise(r => setTimeout(r, intervalMs));
+      await this.sleep(intervalMs);
     }
   }
 

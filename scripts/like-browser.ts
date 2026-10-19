@@ -1,5 +1,12 @@
 #!/usr/bin/env tsx
 // @ts-nocheck
+/**
+ * 实验性人工点赞脚本：用 Playwright 打开好友动态并执行真实点赞（不是事件上报）。
+ *
+ * Cookie 优先级：{cachePath}/cookies.json → QZONE_COOKIE → QZONE_COOKIE_STRING。
+ * 会真实修改 QZone 数据；建议先用 --dry-run 观察候选与频率。
+ * 常用参数：--once / --dry-run / --headless / --max=N / --interval=秒 / --max-age=秒。
+ */
 import 'dotenv/config';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -39,11 +46,20 @@ function sleep(ms: number) { return new Promise(r => setTimeout(r, ms)); }
 
 // ── 主逻辑 ──
 async function main() {
-  // 1. 登录 & 拉取候选
+  // 1. 登录
   const client = new QzoneClient();
-  const cookieJson = JSON.parse(fs.readFileSync(path.join(CACHE_DIR, 'cookies.json'), 'utf8'));
-  const cookieMap = cookieJson.cookies as Record<string, string>;
-  const cookieStr = Object.entries(cookieMap).map(([k, v]) => `${k}=${v}`).join('; ');
+
+  // 从 cookie 文件或环境变量读取
+  const cookiePath = path.join(CACHE_DIR, 'cookies.json');
+  let cookieStr: string;
+  if (fs.existsSync(cookiePath)) {
+    const cookieJson = JSON.parse(fs.readFileSync(cookiePath, 'utf8'));
+    const cookieMap = cookieJson.cookies as Record<string, string>;
+    cookieStr = Object.entries(cookieMap).map(([k, v]) => `${k}=${v}`).join('; ');
+  } else {
+    cookieStr = process.env['QZONE_COOKIE'] ?? process.env['QZONE_COOKIE_STRING'] ?? '';
+    if (!cookieStr) throw new Error('missing cookies.json or QZONE_COOKIE_STRING');
+  }
 
   await client.loginWithCookieString(cookieStr);
   if (!client.loggedIn || !client.qqNumber) throw new Error('Cookie 登录失败');
@@ -62,9 +78,11 @@ async function main() {
       viewport: { width: 1280, height: 800 },
     });
 
-    await ctx.addCookies(
-      Object.entries(cookieMap).map(([name, value]) => ({ name, value, domain: '.qq.com', path: '/' })),
-    );
+    const cookieEntries = cookieStr.split(';').map(c => {
+      const [name = '', ...rest] = c.trim().split('=');
+      return { name: name.trim(), value: rest.join('=').trim(), domain: '.qq.com', path: '/' };
+    }).filter(c => c.name);
+    await ctx.addCookies(cookieEntries);
 
     const page = await ctx.newPage();
 

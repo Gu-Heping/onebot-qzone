@@ -92,8 +92,27 @@ export function createApp(
 
     // Parse body if POST
     if (req.method === 'POST') {
+      const maxBytes = config.maxRequestBodyBytes;
+      const declaredLength = Number(req.headers['content-length']);
+      if (Number.isFinite(declaredLength) && declaredLength > maxBytes) {
+        res.writeHead(413, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ status: 'failed', retcode: 1400, data: null, message: 'request body too large' }));
+        req.destroy();
+        return;
+      }
       const chunks: Buffer[] = [];
-      for await (const chunk of req) chunks.push(chunk as Buffer);
+      let totalBytes = 0;
+      for await (const chunk of req) {
+        const buf = chunk as Buffer;
+        totalBytes += buf.length;
+        if (totalBytes > maxBytes) {
+          res.writeHead(413, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ status: 'failed', retcode: 1400, data: null, message: 'request body too large' }));
+          req.destroy();
+          return;
+        }
+        chunks.push(buf);
+      }
       const bodyStr = Buffer.concat(chunks).toString('utf8');
       if (bodyStr) {
         try {

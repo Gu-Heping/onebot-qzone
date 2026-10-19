@@ -14,22 +14,33 @@ npm run dev              # Run in development mode (tsx src/main.ts)
 npm run build            # Build main project to dist/
 npm run build:plugin     # Build NapCat plugin to napcat-plugin/dist/
 npm run typecheck        # TypeScript type check only (tsc --noEmit)
+npm run typecheck:plugin # NapCat plugin type check
+```
+
+### Instant Like / WIP Scripts
+```bash
+npm run like:instant -- --dry-run --once  # Preview candidates only (recommended first)
+npm run like:instant                      # Continuous loop; performs real likes
+npm run like:browser                      # Experimental manual Playwright like script
+npm run login:qr                          # QR re-login (no-op if already logged in)
 ```
 
 ### Testing
 ```bash
-npm test                 # Run unit tests only (127 tests across 11 suites)
+npm test                 # Run all unit tests (auto-discovers test/unit/*.test.ts)
 npm run test:api         # Unit tests + API integration tests (requires running bridge)
 npm run test:api:readonly # Unit + read-only API tests (safer, no data creation)
-npm run verify           # Endpoint health check (read + write probes)
+npm run verify           # Endpoint health check (9 reads + 2 write probes)
 npm run verify:readonly  # Endpoint health check (read-only)
 ```
 
-### Running a Single Test File
-Tests use a custom runner (`test/run-all.ts`). To run a single test suite:
+### Running a Subset of Tests
+Tests use a custom runner (`test/run-all.ts`) that auto-discovers `test/unit/*.test.ts`.
+Run suites whose filename contains a substring:
 ```bash
-npx tsx test/unit/utils.test.ts
+npm test -- --suite feeds3
 ```
+The runner prints actual suite/case counts; use that output as the source of truth.
 
 ## Architecture
 
@@ -58,12 +69,14 @@ The QZone API client with multi-level fallback strategies for reliability:
 ### Bridge Layer (`src/bridge/`)
 OneBot v11 protocol implementation:
 
-- **`server.ts`** - HTTP API + WebSocket server (Express-like)
+- **`server.ts`** - HTTP API + WebSocket server (Express-like); POST bodies capped by `ONEBOT_MAX_REQUEST_BODY_BYTES` (default 64 MiB)
 - **`actions.ts`** - OneBot action handlers mapping to QZone client methods
-- **`poller.ts`** - Event polling with independent timers for posts/comments/likes
+- **`poller.ts`** - Event polling with independent timers for posts/comments/likes/friend feeds
+- **`firstRunBaseline.ts`** - First-run silent baseline state (`baseline_state.json`): records existing posts/comments/likes without emitting history events
 - **`hub.ts`** - EventHub for pub/sub event distribution
-- **`network.ts`** - HTTP POST event pushing + reverse WebSocket connections
-- **`config.ts`** - Environment-based configuration
+- **`network.ts`** - HTTP POST event pushing + reverse WebSocket connections (stop-aware reconnect loops)
+- **`config.ts`** - Environment-based configuration with numeric fallback validation
+- **`instant-like-*.ts`** - Instant-like pipeline (candidates, state, feed sources, feed cache)
 
 ### NapCat Plugin (`napcat-plugin/`)
 Native NapCat plugin proxying the bridge's REST API and event stream. Built separately with its own tsconfig extending the root.
@@ -94,12 +107,15 @@ QZONE_ENABLE_QR=1                    # Fallback to QR code login
 
 # Server
 ONEBOT_HOST=0.0.0.0
-ONEBOT_PORT=5700
+ONEBOT_PORT=5700                     # Built-in default is 8080 when unset
 
-# Polling intervals (seconds)
-ONEBOT_POLL_INTERVAL=30              # Post polling
-ONEBOT_COMMENT_POLL_INTERVAL=30      # Comment polling
-ONEBOT_LIKE_POLL_INTERVAL=60         # Like polling
+# Polling intervals (seconds; code defaults shown)
+ONEBOT_POLL_INTERVAL=60              # Post polling
+ONEBOT_COMMENT_POLL_INTERVAL=120     # Comment polling
+ONEBOT_LIKE_POLL_INTERVAL=180        # Like polling
+
+# First-run baseline (default 1: silently record existing events; 0 = replay)
+ONEBOT_BASELINE_ON_FIRST_RUN=1
 
 # Playwright (for QR login)
 QZONE_PLAYWRIGHT_HEADLESS=           # auto-detect from $DISPLAY
@@ -138,7 +154,11 @@ src/
 │   │   ├── comments.ts       # 评论 parseFeeds3Comments
 │   │   ├── likes.ts          # 点赞 parseFeeds3Likes
 │   │   ├── meta.ts           # 说说元数据 parseFeeds3PostMeta
+│   │   ├── feedDataCanonical.ts # tid 归一
+│   │   ├── tidParams.ts      # 点赞/评论参数推导
 │   │   └── helpers.ts        # Mention/Video/Reply/Device/好友/翻页
+│   ├── config/                # env.ts (QZONE_*), constants.ts
+│   ├── infra/                 # errors.ts, retry.ts
 │   ├── schemas.ts             # Zod validation schemas
 │   ├── validate.ts            # Validation entry points
 │   └── ...
@@ -146,11 +166,15 @@ src/
     ├── server.ts              # HTTP/WS server
     ├── actions.ts             # OneBot actions
     ├── poller.ts              # Event polling
+    ├── firstRunBaseline.ts    # Silent first-run baseline
+    ├── commentDedup.ts        # Comment dedup keys
+    ├── stablePostKey.ts       # Stable post keys
+    ├── instant-like-*.ts      # Instant-like pipeline
     └── ...
 
 test/
-├── run-all.ts                 # Test runner
-├── unit/                      # 11 test suites (127 tests)
+├── run-all.ts                 # Test runner (auto-discovers test/unit/*.test.ts)
+├── unit/                      # Unit suites; counts printed by runner
 └── api-interfaces.ts          # API integration tests
 
 napcat-plugin/

@@ -37,6 +37,40 @@ const cases: TestCase[] = [
     },
   },
   {
+    name: 'fromEnv ignores invalid numeric values',
+    fn: () => {
+      const prev = process.env['ONEBOT_POLL_INTERVAL'];
+      try {
+        process.env['ONEBOT_POLL_INTERVAL'] = 'abc';
+        assert(fromEnv().pollInterval === 60, 'NaN should fall back to 60');
+        process.env['ONEBOT_POLL_INTERVAL'] = '-5';
+        assert(fromEnv().pollInterval === 60, 'negative should fall back to 60');
+        process.env['ONEBOT_POLL_INTERVAL'] = '';
+        assert(fromEnv().pollInterval === 60, 'empty should fall back to 60');
+      } finally {
+        if (prev !== undefined) process.env['ONEBOT_POLL_INTERVAL'] = prev;
+        else delete process.env['ONEBOT_POLL_INTERVAL'];
+      }
+    },
+  },
+  {
+    name: 'fromEnv parses baseline switch',
+    fn: () => {
+      const prev = process.env['ONEBOT_BASELINE_ON_FIRST_RUN'];
+      try {
+        process.env['ONEBOT_BASELINE_ON_FIRST_RUN'] = '0';
+        assert(fromEnv().baselineOnFirstRun === false, '0 disables baseline');
+        process.env['ONEBOT_BASELINE_ON_FIRST_RUN'] = 'yes';
+        assert(fromEnv().baselineOnFirstRun === true, 'yes enables baseline');
+        process.env['ONEBOT_BASELINE_ON_FIRST_RUN'] = 'not-a-bool';
+        assert(fromEnv().baselineOnFirstRun === true, 'invalid falls back to default true');
+      } finally {
+        if (prev !== undefined) process.env['ONEBOT_BASELINE_ON_FIRST_RUN'] = prev;
+        else delete process.env['ONEBOT_BASELINE_ON_FIRST_RUN'];
+      }
+    },
+  },
+  {
     name: 'fromEnv parses proxy config',
     fn: () => {
       const prevProxy = process.env['QZONE_PROXY_URL'];
@@ -67,6 +101,8 @@ const cases: TestCase[] = [
         commentPollInterval: 120,
         likePollInterval: 180,
         friendFeedPollInterval: 120,
+        maxRequestBodyBytes: 64 * 1024 * 1024,
+        baselineOnFirstRun: true,
         enableQr: false,
         emitMessageEvents: true,
         emitCommentEvents: true,

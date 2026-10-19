@@ -1,6 +1,8 @@
 # 接口可用性矩阵与常见业务码
 
 > 基于 2026-02 实测结论，可用性与账号状态、网络环境、风控策略相关。
+>
+> **当前实现状态（2026-10）**：本文的「POST 可用 / 降级 feeds3」是历史探测结论。当前代码中说说列表只走 `feeds3_html_more`；评论与点赞列表均为 **feeds3-only**，PC/mobile 评论接口不再作为主链路。以 `src/qzone/client.ts` 为准。
 
 ## 接口可用性矩阵
 
@@ -8,10 +10,10 @@
 
 | 端点/功能 | 方法 | 域名 | 状态 | 备注 |
 |-----------|------|------|------|------|
-| `feeds3_html_more` | GET | ic2.qzone.qq.com | ✅ 可靠 | 主要数据源，HTML 解析 |
-| `emotion_cgi_msglist_v6` | GET | taotao.qzone.qq.com | ⚠️ 可能限流 | `-10000` 时降级 feeds3 |
-| `emotion_cgi_getdetailv6` | POST | taotao.qzone.qq.com | ⚠️ GET空/POST可用 | POST 优先策略 |
-| `emotion_cgi_getcmtreply_v6` | POST/GET | taotao.qzone.qq.com | ⚠️ GET空/POST可用 | POST 优先策略 |
+| `feeds3_html_more` | GET | ic2.qzone.qq.com | ✅ 可靠 | **当前唯一说说列表数据源**，HTML 解析 |
+| `emotion_cgi_msglist_v6` | GET | taotao.qzone.qq.com | ❌ 实测 -10000 | 不再作为主链路 |
+| `emotion_cgi_getdetailv6` | POST | taotao.qzone.qq.com | ⚠️ 历史探测 | 现多失败，详情走列表 / `act_all` 兜底 |
+| `emotion_cgi_getcmtreply_v6` | POST/GET | taotao.qzone.qq.com | ❌ 实测 -3/不可用 | 评论改走 feeds3 HTML |
 
 ### 写操作接口
 
@@ -20,8 +22,8 @@
 | `emotion_cgi_publish_v6` | POST | taotao.qzone.qq.com | ✅ 可靠 | 发布说说 |
 | `emotion_cgi_delete_v6` | POST | taotao.qzone.qq.com | ✅ 可靠 | 删除说说 |
 | `emotion_cgi_re_feeds` | POST | taotao.qzone.qq.com | ✅ 可靠 | 评论/转发说说 |
-| `like_cgi_likev6` | POST | taotao.qzone.qq.com | ✅ 可靠 | 点赞 |
-| `internal_dolike_app` | POST | w.qzone.qq.com | ✅ 可靠 | 取消点赞 |
+| `internal_dolike_app` | POST | w.qzone.qq.com | ✅ 可靠 | 点赞/取消点赞首选（`active=0`） |
+| `like_cgi_likev6` | POST | taotao.qzone.qq.com | ✅ 可用 | 点赞/取消备选（取消时 `optype=1`） |
 | `emotion_cgi_forward_v6` | POST | taotao.qzone.qq.com | ⚠️ -3000 | 转发可能失败 |
 | `cgi_upload_image` | POST | up.qzone.qq.com | ✅ 可靠 | 图片上传 |
 
@@ -52,8 +54,8 @@
 | `mobile.qzone.qq.com/like` | POST | 直连 | ❌ 404 | 不可用 |
 | `mobile.qzone.qq.com/list` | GET | 直连 | ⚠️ -4003 | 业务受限 |
 | `mobile.qzone.qq.com/get_mood_list` | GET | 直连 | ❌ 404 | 不可用 |
-| `mobile.qzone.qq.com/get_comment_list` | GET | 直连 | ⚠️ 不稳定 | 备选 |
-| `mobile.qzone.qq.com/del_comment` | POST | 直连 | ⚠️ 不稳定 | 备选 |
+| `mobile.qzone.qq.com/get_comment_list` | GET | 直连 | ❌ 不可用 | 评论改走 feeds3 HTML |
+| `mobile.qzone.qq.com/del_comment` | POST | 直连 | ⚠️ 历史探测 | 删除评论仍保留该实现路径 |
 
 ### 登录接口
 
@@ -75,7 +77,7 @@
 | `-3` | 认证失败/权限不足 | 检查 Cookie 有效性 |
 | `-100` | 认证失败 | 检查 Cookie 有效性 |
 | `-3000` | 认证失败/接口限制 | 检查 Cookie 有效性 |
-| `-10000` | 限流 | 降级到 feeds3 |
+| `-10000` | 限流 | 列表读取已直接走 feeds3，无需降级 |
 | `-10001` | 认证失败 | 检查 Cookie 有效性 |
 | `-10004` | 参数错误/接口已废弃 | 使用替代接口 |
 | `-10006` | 认证失败 | 检查 Cookie 有效性 |
@@ -117,9 +119,9 @@ const AUTH_FAIL_CODES = new Set([-3, -100, -3000, -10001, -10006]);
 | POST 成功率 | ✅ 高 | ❌ 低 |
 | GET 成功率 | ⚠️ 不稳定 | ❌ 低 |
 | 功能完整性 | 完整 | 基础 |
-| 推荐策略 | 主用 | 仅作 fallback |
+| 推荐策略 | 写操作主用 | 仅探测/兜底 |
 
-详情/评论/删评这 3 类接口在当前实现中默认走 PC 端 proxy 路由，移动端路由作为探测备选。路由可通过 `probeApiRoutes()` 自动探测。
+详情/评论/点赞的**读取**当前以 **feeds3 HTML** 为主（见 [`fallback-strategy.md`](fallback-strategy.md)）；详情与写操作仍走 PC proxy 路由，移动端路由仅作探测/兜底。路由可通过 `probeApiRoutes()` 自动探测。
 
 ---
 
@@ -127,6 +129,6 @@ const AUTH_FAIL_CODES = new Set([-3, -100, -3000, -10001, -10006]);
 
 | 接口 | 替代方案 |
 |------|---------|
-| `emotion_cgi_getlist_v6` | 使用 `emotion_cgi_msglist_v6` |
+| `emotion_cgi_getlist_v6` | 历史接口；当前说说列表使用 `feeds3_html_more` |
 | `emotion_cgi_addcomment_ugc` | 使用 `emotion_cgi_re_feeds` |
 | `fcg_list_album` | 使用 `cgi_list_album`（虽然也返回 500） |

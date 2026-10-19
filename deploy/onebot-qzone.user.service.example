@@ -1,4 +1,13 @@
-# 复制到 ~/.config/systemd/user/onebot-qzone.service 后: systemctl --user daemon-reload
+# 复制到 ~/.config/systemd/user/onebot-qzone.service 后:
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now onebot-qzone
+#   journalctl --user -u onebot-qzone -f
+#
+# 注意：
+# - 这是 systemd **user unit**（不需要 root；如需开机即启：loginctl enable-linger <user>）。
+# - 首次部署先安装依赖：`npm ci --include=dev`。
+#   tsup 位于 devDependencies，`npm ci --omit=dev` 会导致 ExecStartPre 的 `npm run build` 失败。
+# - ONEBOT_PORT 未设置时代码内置默认是 8080；本示例显式使用 5700，请按实际反向代理/端口放行调整。
 [Unit]
 Description=OneBot-QZone bridge (QQ 空间桥接)
 After=network.target

@@ -1,5 +1,7 @@
 # 功能缺口与路线图
 
+> **当前实现状态（2026-10）**：说说/评论/点赞的读取均已收敛到 feeds3；表中部分历史描述（如 `emotion_cgi_msglist_v6`、`getcmtreply_v6`）已不代表现状。评论点赞与留言板**均未实现**，代码中也没有预留的 client 方法或 action。
+>
 > QQ 空间 Web 端主要功能与当前实现的对应关系，以及待逆向并实现的优先级列表。  
 > **功能全景**见 [qzone-feature-matrix.md](qzone-feature-matrix.md)；**逆向与实现步骤**见 [reverse-engineering-guide.md](reverse-engineering-guide.md)。
 
@@ -7,13 +9,14 @@
 
 | 功能 | 当前状态 | 依赖接口 / 实现方式 | 优先级 | 备注 |
 |------|----------|---------------------|--------|------|
-| 说说列表 | 已实现 | emotion_cgi_msglist_v6 → feeds3_html_more | - | 限流时降级 feeds3 |
-| 说说详情 | 已实现 | POST/GET getdetailv6 → mobile → emotion_list | - | 多变体 + winning variant |
+| 说说列表 | 已实现 | **feeds3_html_more + parseFeeds3Items** | - | 不再调用 emotion_cgi_msglist_v6 |
+| 说说详情 | 已实现 | getdetailv6 多变体 → mobile → feeds3 列表匹配 | - | PC 端实机多失败，列表兜底为主 |
 | 说说发布/删除 | 已实现 | emotion_cgi_publish_v6 / emotion_cgi_delete_v6 | - | |
-| 评论获取 | 已实现 | POST/GET getcmtreply_v6 → mobile | - | |
-| 评论发表/删除 | 已实现 | emotion_cgi_re_feeds / emotion_cgi_delcomment_ugc 等 | - | |
-| **评论点赞** | 未实现 | 网页端无此入口，可能仅移动端有；若实现需移动端抓包 | P2 | client/action 已预留 like_comment |
-| 点赞/取消点赞（说说） | 已实现 | like_cgi_likev6、internal_dolike_app → like optype=1 → mobile | - | |
+| 评论获取 | 已实现 | **feeds3 好友流 → 作者 scope=1 → feeds_html_act_all 分页** | - | 老帖可能 not_embedded |
+| 评论发表/删除 | 已实现 | emotion_cgi_re_feeds / cgi_qzsharedeletecomment 等 | - | |
+| **评论点赞** | 未实现 | 网页端无此入口，可能仅移动端有；若实现需移动端抓包 | P2 | **无预留实现**，client/action 均不存在 like_comment |
+| 点赞/取消点赞（说说） | 已实现 | internal_dolike_app → like_cgi_likev6 → mobile；另有 Playwright 点击路径 | - | |
+| **即时点赞（instant-like）** | 已实现 | `scripts/instant-like.ts` + `src/bridge/instant-like-*.ts` | - | Playwright 优先，见 [docs/INSTANT_LIKE.md](../docs/INSTANT_LIKE.md) |
 | 转发说说 | 已实现 | emotion_cgi_forward_v6 → emotion_cgi_re_feeds(forward=1) | - | 可能 -3000 |
 | 好友列表 | 已实现 | cgi_get_friend_list → feeds3 提取 → 可选 Playwright | - | |
 | 访客列表 | 已实现 | cgi_right_get_visitor_more | - | 无额外降级 |
@@ -25,11 +28,11 @@
 | 登录/登出/缓存重置 | 已实现 | Cookie 登录、reset_api_caches | - | |
 | 路由探测 | 已实现 | probe_api_routes | - | |
 | **视频说说** | 已实现 | 在 feeds3 解析 f-ct-video/f-video-wrap，提取 video_url、video_cover、尺寸 | - | get_emotion_list 的 msglist 中带 feed_type/video_* 字段；详情沿用 API 返回 |
-| **留言板** | 部分 | 待抓包：个人档留言列表/发表/删除（域名与 cgi） | **P1** | client/action 已预留，见 doc/board-api.md；抓包后补全实现 |
+| **留言板** | 未实现 | 待抓包：个人档留言列表/发表/删除（域名与 cgi） | **P1** | **无预留实现**；见 doc/board-api.md（仅逆向资料），client/action 均不存在 |
 | **日志（博客）** | 未实现 | 待抓包：日志列表/正文/发表/删除（若仍有开放接口） | P2 | |
 | **签到** | 未实现 | 待抓包：签到状态/执行签到（若有开放接口） | P2 | |
 | **礼物** | 未实现 | 待抓包：送礼/礼物墙（若有开放接口） | P2 | |
-| **增强互动** | 未实现 | 表情评论、@ 人等；若仅前端展示可暂不实现 | P2 | 若有独立接口则列入 |
+| **增强互动** | 未实现 | 表情评论、@ 人等；若仅前端展示可暂不实现 | P2 | 表情转换与 @ 提及已在评论发送中实现 |
 
 ## 优先级说明
 

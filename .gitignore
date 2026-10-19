@@ -11,13 +11,18 @@ test_cache_real/
 logs/
 playwright_debug.html
 bridge.log
+debug.log
 debug_output.txt
 latest_api_response.json
 latest_feeds_debug.json
 test.txt
 .bridge.pid
 .pid
+*.pid
 EOF
+
+# Local agent settings
+.claude/settings.local.json
 
 # Env
 .env

@@ -1,8 +1,10 @@
 # 服务器端问题排查（给维护服务器的 Cursor / 运维）
 
+> 2026-10 起，桥接**不再写 `debug.log`**。运行日志统一输出到 stdout/stderr（systemd 下由 journald 收集）；需要落盘时用本文的 `QZONE_DEBUG_DUMP` / `ONEBOT_EVENT_DEBUG`。
+
 ## 现象：好友动态里只有图片 URL、没有 base64
 
-**结论（本地已验证）**：桥接逻辑正确。当请求带 `include_image_data: true` 时，会拉取白名单图片并写入 `msglist[].pic[].base64`，返回体里已包含 base64（日志见 `totalFetched`、`sampleBase64Len`）。
+**结论（本地已验证）**：桥接逻辑正确。当请求带 `include_image_data: true` 时，会拉取白名单图片并写入 `msglist[].pic[].base64`，返回体里已包含 base64。
 
 若服务器上仍出现「只有 URL 无 base64」，按下面步骤排查。
 
@@ -10,24 +12,49 @@
 
 ## 1. 确认桥接是否稳定运行
 
-- 若进程反复重启，查看 **`$QZONE_CACHE_PATH/debug.log`** 中是否有 `main.ts:fatal` 条目。
-- 若有，根据其中的 `error` / `stack` 修复（常见：Cookie 失效、端口占用、网络超时）。
+- systemd（user 单元）查看日志：
+  ```bash
+  journalctl --user -u onebot-qzone -f
+  ```
+- 前台运行时直接看终端输出；进程崩溃会打印 `[FATAL] <error>`。
+- 常见原因：Cookie 失效、端口占用、网络超时、请求体超过上限（HTTP 413）。
 
-## 2. 确认图片拉取是否在服务器上成功
+## 2. 打开排查日志
 
-- 触发一次「获取好友动态」（带 `include_image_data: true`）。
-- 查看 **`$QZONE_CACHE_PATH/debug.log`**：
-  - **H1**：是否进入 `action_get_friend_feeds`，`willEnrich: true`。
-  - **H2**：`first item pic` 是否有 `whitelist: true`；若有 **H4**，说明 `fetchImageWithAuth` 在服务器上失败（网络/Referer/域名策略），需在服务器环境修网络或请求头。
-  - **first fetch ok** / **enrich done**：若有 `totalFetched >= 1`、`sampleBase64Len > 0`，说明桥接已把 base64 写入返回的 msglist。
+| 变量 | 作用 | 输出位置 |
+|------|------|----------|
+| `ONEBOT_EVENT_DEBUG=1` | 事件去重/发布日志、轮询器调试日志 | stdout / journald |
+| `QZONE_DEBUG_DUMP=1` | feeds3 HTML 与原始响应落盘 | `{QZONE_CACHE_PATH}/debug/` |
+| `QZONE_IMAGE_DEBUG_TLS=1` | 图片 TLS 握手 trace | stderr / journald |
+| `QZONE_DEBUG_DUMP` + SDK 失败 | 解析诊断（`parse_trace`） | `{QZONE_CACHE_PATH}/diagnostics/parse_trace/` |
 
-### 2.1 若 H4 显示 502 或 body 为空（CDN/环境问题）
+`QZONE_DEBUG_DUMP=1` 会生成：
+
+- `debug/feeds3_<uin>_<scope>.html`：最近一次 feeds3 解码后的 HTML（稳定文件名）
+- `debug/feeds3_<uin>_<scope>_<timestamp>.html`：每次请求的快照
+- `debug/<name>_<timestamp>.txt`：校验失败等场景转存的原始响应
+
+排查完建议关闭，避免磁盘增长。
+
+## 3. 确认图片拉取是否在服务器上成功
+
+1. 触发一次「获取好友动态」（带 `include_image_data: true`）。
+2. 观察日志中的图片拉取异常（`fetchImageWithAuth` 抛出的状态码/网络错误）与最终 `msglist` 中 `pic[].base64` 是否存在。
+3. 若日志出现 502 / 空 body / TLS 断开，按 3.1 处理。
+
+图片请求的固定行为（无需改代码）：
+
+- `photo.store.qq.com` 的 `http://` URL 会强制升级为 HTTPS
+- 带 `Referer: https://user.qzone.qq.com/`、**随机浏览器 UA / Accept-Language**、Cookie
+- 剥离 `X-Forwarded-*`、`Via`、`Connection` 等代理/转发类请求头
+- TLS：TLSv1.2–1.3、ALPN 仅 `http/1.1`、keep-alive
+- 502 / 可重试网络错误自动退避重试 3 次（250 ms × 2^n + 随机 0–120 ms）
+
+### 3.1 若出现 502 或 body 为空（CDN/环境问题）
 
 **根因**：请求 `photo.store.qq.com`（及子域如 `photonjmaz.photo.store.qq.com`）时，CDN 返回 502 或空 body，属于**网络/环境或 CDN 策略**问题，而非桥接代码错误。
 
 **真正值得先验证的是**：把腾讯图片域名设为 DIRECT 后，502 是否立刻消失；若消失，可判断为代理出口或转发层问题，而非 Cookie/Referer 或桥接业务代码问题。
-
-桥接已对图片请求**剥离代理/转发类请求头**（如 X-Forwarded-*、Via、Connection 等），避免中间层误判；并对 **502 做带退避的重试**（失败时自动重试数次）。**不推荐**将 X-Forwarded-For 等头当作解决 502 的主要手段。
 
 ---
 
@@ -70,11 +97,11 @@ dns:
 
 1. 在 Mihomo `config.yaml` 加上上述 DIRECT 规则（及可选 direct-nameserver）。
 2. 重启 Mihomo。
-3. 在服务器上对**同一张图片 URL**（从 debug.log 的 H4 或 H2 里取）做两次测试：
+3. 在服务器上对**同一张图片 URL**（从 `QZONE_DEBUG_DUMP` 转存或 action 返回中取）做两次测试：
    - 直连：`curl -I --http1.1 "https://<图片URL>"`
    - 经代理：`curl -I --http1.1 -x http://127.0.0.1:7890 "https://<图片URL>"`
-4. 若**直连成功、代理失败** → 基本可判定为代理出口问题，无需再改 Axios 代码。
-5. 若**直连也 502** → 再考虑 TLS/指纹（见下「不要先做的事」）。
+4. 若**直连成功、代理失败** → 基本可判定为代理出口问题，无需再改代码。
+5. 若**直连也 502** → 再考虑出口/IP、MTU 或 TLS 因素。
 
 **可选策略组 TENCENT_IMG**：为腾讯图片 CDN 单独建 `select` 组，便于快速切换 DIRECT / 不同节点验证出口：
 
@@ -95,40 +122,39 @@ rules:
   - MATCH,YourDefaultPolicy
 ```
 
-可快速验证 DIRECT 是否可用、哪个节点对腾讯 CDN 更友好。
+**不要先做的事**：一上来大改 TLS cipher；把问题归因到重试或 headers；同时改多个变量。
 
-**不要先做的事**：一上来大改 TLS cipher；把问题归因到 Axios 重试或 headers；同时改多个变量。
-
-**仅在「直连仍 502」时**做最小化 TLS 试验，顺序建议：(1) 桥接侧不设 `QZONE_IMAGE_PROXY`（`proxy: false`）再测；(2) 自定义 `httpsAgent` 的 `minVersion`（至少 TLSv1.2）、`servername`（按 URL host）、`keepAlive` 等，**不要先改 cipher list**；(3) 最后才在确有需要时做小范围 cipher 试探。Node 默认 TLS 套件已按安全实践选取，改 cipher 影响安全；若 CDN 按 IP/ASN/风控拦截，改 ciphers 往往无效，优先换出口或 DIRECT。
+**仅在「直连仍 502」时**做最小化 TLS 试验，顺序建议：(1) 不设 `QZONE_IMAGE_PROXY`（直连）再测；(2) 用 `QZONE_IMAGE_DEBUG_TLS=1` 看握手卡在哪一步；(3) 最后才考虑自定义 cipher。若 CDN 按 IP/ASN/风控拦截，改 ciphers 往往无效，优先换出口或 DIRECT。
 
 ---
 
 **建议排查**：
 
-1. **同一台机用 curl 测 CDN 是否可达**（替换为实际 Cookie 与图片 URL）：
+1. **同一台机用 curl 测 CDN 是否可达**（替换为实际 Cookie 与图片 URL，统一用 HTTPS）：
    ```bash
-   curl -sI -b "uin=oXXXX; p_skey=xxx; skey=yyy" "http://photonjmaz.photo.store.qq.com/psc?/V114Dbch4DH9xX/..."
+   curl -sI -b "uin=oXXXX; p_skey=xxx; skey=yyy" "https://photonjmaz.photo.store.qq.com/psc?/V114Dbch4DH9xX/..."
    ```
    若返回 502，说明该环境/出口 IP 访问 QZone 图片 CDN 异常（限流、策略或网络问题）。
 
-2. **与浏览器请求头对齐**：用浏览器登录空间、打开带图动态，在开发者工具里看该图片请求的 **Referer、User-Agent** 等。桥接里 `fetchImageWithAuth` 已设置 `Referer: https://user.qzone.qq.com/`；若 CDN 还校验 User-Agent，可在 `client.ts` 的该请求中加上与浏览器一致的 User-Agent（或复用现有 `USER_AGENTS` 池）。
+2. **换环境**：在本机或能正常打开空间图片的机器/网络（或换出口 IP）上跑桥接，验证是否仅为当前环境不可达 CDN。
 
-3. **换环境**：在本机或能正常打开空间图片的机器/网络（或换出口 IP）上跑桥接，验证是否仅为当前环境不可达 CDN。
+3. **走代理（可选）**：若持续 502 且服务器有 HTTP 代理（如 Mihomo），可设置 **`QZONE_IMAGE_PROXY=http://127.0.0.1:7890`**，仅图片拉取经代理出口，其余 API 仍直连。
 
-4. **走代理（推荐）**：若 H4 持续 502 且服务器有 HTTP 代理（如 Mihomo），可设置 **`QZONE_IMAGE_PROXY=http://127.0.0.1:7890`**，仅图片拉取经代理出口，其余 API 仍直连。重启桥接后再次触发「获取好友动态」，查看 debug.log 中 H4 是否消失、`enrich done` 中 `totalFetched`/`sampleBase64Len` 是否大于 0。
+### 3.2 若经代理拉图仍出现 TLS/连接断开错误
 
-### 2.2 若经代理拉图仍出现 TLS/连接断开错误
+**现象**：`Client network socket disconnected before secure TLS connection was established` 或 `ECONNRESET` / `ETIMEDOUT`。
 
-**现象**：`debug.log` H4 报 `Client network socket disconnected before secure TLS connection was established` 或 `ECONNRESET`/`ETIMEDOUT`。
+**桥接侧**已固定：`ALPNProtocols: ['http/1.1']`、TLSv1.2–1.3、浏览器风格 cipher、失败退避重试 3 次（502 也会重试）。
 
-**桥接侧**：当前实现已固定以下 TLS 参数，无需另行调整：
-- `ALPNProtocols: ['http/1.1']`（禁用 HTTP/2，降低握手复杂度）
-- TLSv1.2–1.3，浏览器风格 cipher 列表
-- 失败时自动退避重试 3 次（250 ms × 2^n + 随机 0–120 ms），**502 也会触发重试**
+若 CDN 按 IP/ASN/风控拦截，改 ciphers 往往无效，优先换出口或按 3.1 做 DIRECT 分流。
 
-若 CDN 按 IP/ASN/风控拦截，改 ciphers 往往无效，优先换出口或按 2.1 做 DIRECT 分流。
+**如需 TLS 握手 trace**：在 systemd user 单元 `[Service]` 段加 `Environment=QZONE_IMAGE_DEBUG_TLS=1`，重启后：
 
-**如需 TLS 握手 trace**：在 systemd service 的 `[Service]` 段加 `Environment=QZONE_IMAGE_DEBUG_TLS=1`，重启桥接，TLS 握手包 trace 会输出到 `stderr`（`journalctl --user -u onebot-qzone -f`），可判断卡在 ClientHello、证书交换还是代理 CONNECT 阶段。
+```bash
+journalctl --user -u onebot-qzone -f
+```
+
+可判断卡在 ClientHello、证书交换还是代理 CONNECT 阶段。
 
 **Mihomo 规则顺序建议**：规则**从上到下**匹配。将 QZone 图片 CDN 域名置于最前走 DIRECT，再接通用代理：
 
@@ -140,7 +166,7 @@ rules:
   - MATCH,PROXY
 ```
 
-**rule-providers（inline）+ RULE-SET + 可选兜底组**：便于直接粘贴，腾讯图片域名用规则集、其余流量可走可选代理组。若希望腾讯图片强制直连用 `RULE-SET,tencent_img,DIRECT`；若希望保留可切换兜底则用下面 `ImgFallback`（需将「你的主代理」「自动选择」等按实际名称替换）：
+**rule-providers（inline）+ RULE-SET + 可选兜底组**：
 
 ```yaml
 rule-providers:
@@ -166,9 +192,9 @@ rules:
   - MATCH,ImgFallback
 ```
 
-若上述域名改为 DIRECT 后 502 消失，可判断为**代理出口或转发层**问题，而非 Cookie/Referer 业务层问题；若仍 502，再查直连出口、MTU 或 Mihomo TUN/转发链路。
+若上述域名改为 DIRECT 后 502 消失，可判断为**代理出口或转发层**问题；若仍 502，再查直连出口、MTU 或 Mihomo TUN/转发链路。
 
-**可选：外部规则包（type: http）**：若希望可更新的外部规则集，可使用 `rule-providers` 的 `type: http`、`proxy: DIRECT`、`format: yaml`、`interval` 等（与下面 tencent_cdn 示例一致）：
+**可选：外部规则包（type: http）**：
 
 ```yaml
 rule-providers:
@@ -190,11 +216,11 @@ payload:
   - DOMAIN-SUFFIX,qzonestyle.gtimg.cn
 ```
 
-## 3. 若桥接日志正常但客户端仍无 base64
+## 4. 若桥接日志正常但客户端仍无 base64
 
 - 核对客户端（如 NapCat/OpenClaw 插件）期望的字段：桥接返回的是 **`msglist[].pic[]`** 中每项带 **`url`、`base64`、`content_type`**。若客户端读的是其他字段（如顶层 `image_data`），需在客户端或桥接侧做字段映射。
 
-## 4. 本地快速验证（不依赖服务器）
+## 5. 本地快速验证（不依赖服务器）
 
 在项目根目录执行：
 
@@ -202,10 +228,23 @@ payload:
 npx tsx test/debug-friend-feeds-local.ts
 ```
 
-会直接调用 `action_get_friend_feeds(include_image_data: true)` 并写入 **`./test_cache/debug.log`**（或 `$QZONE_CACHE_PATH/debug.log`）。根据该文件中的 H1/H2/H3/H4、`first fetch ok`、`enrich done` 即可判断行为是否符合预期。
+会直接调用 `action_get_friend_feeds(include_image_data: true)`，并打印：
+
+```
+msglist: N 条，含图: X 条，图带 base64: Y 条
+```
+
+若 `含图 > 0` 且 `图带 base64 = 0`，说明本机网络/出口访问图片 CDN 异常，按第 3 节排查。
 
 ---
 
-**日志路径**：始终为 **`$QZONE_CACHE_PATH/debug.log`**（未设置时默认 `./test_cache/debug.log`）。部署时保证该目录可写，排查时拉取此文件即可。
+**日志位置小结**：
 
-**小结**：H1/H2/H3 正常而 H4 报 502 → 桥接逻辑无误，问题在访问 QZone 图片 CDN 的环境（网络/出口/IP 或 CDN 策略）；按 2.1 的 curl、请求头、换环境逐步排查即可。
+| 内容 | 位置 |
+|------|------|
+| 运行/轮询/事件日志 | stdout；systemd 下 `journalctl --user -u onebot-qzone` |
+| feeds3 HTML / 原始响应 | `{QZONE_CACHE_PATH}/debug/`（需 `QZONE_DEBUG_DUMP=1`） |
+| 解析诊断 | `{QZONE_CACHE_PATH}/diagnostics/parse_trace/` |
+| TLS trace | stderr（需 `QZONE_IMAGE_DEBUG_TLS=1`） |
+
+**结论**：图片拉取返回 502/空体 → 桥接逻辑无误，问题在访问 QZone 图片 CDN 的环境（网络/出口/IP 或 CDN 策略）；按第 3 节的 curl、换环境、DIRECT 分流逐步排查即可。

@@ -1,5 +1,7 @@
 # feeds3_html_more 接口及 HTML 解析
 
+> **当前实现状态（2026-10）**：feeds3 已不是「降级」，而是说说列表、评论、点赞的**唯一读取主链路**；`emotion_cgi_msglist_v6` 不再被调用。下文「主接口被限流时降级」的措辞属于历史背景。
+
 ## 概述
 
 `feeds3_html_more` 是 QQ 空间中**最可靠的数据源**：只需 Cookie + g_tk 即可正常返回，不受 taotao proxy 层的 GET 限制。
